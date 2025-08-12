@@ -9,6 +9,7 @@ from .utils import setup_rich_logging, get_logger
 from .processing import build_manifest as build_manifest_fn
 from .processing import build_ingredient_map as build_ingredient_map_fn
 from .io.hdf5_writer import initialize_h5
+from .processing.pipeline import process_all as process_all_fn
 
 app = typer.Typer(add_completion=False, help="HSIFoodIngr-64 HDF5 builder CLI")
 
@@ -78,6 +79,27 @@ def init_h5(
 
     initialize_h5(h5_path=h5_path, ingredient_map=ingredient_map, wavelengths=wavelengths, overwrite=overwrite)
     typer.echo(str(h5_path))
+
+
+@app.command("process")
+def process(
+    raw_dir: Path = typer.Option(Path("data/raw"), exists=True, file_okay=False, resolve_path=True,
+                                 help="Root directory of raw data"),
+    artifacts_dir: Path = typer.Option(Path("data/artifacts"), file_okay=False, resolve_path=True,
+                                       help="Artifacts directory (manifest, ingredient_map.json, logs)"),
+    h5_path: Path = typer.Option(Path("data/h5/HSIFoodIngr-64.h5"), exists=True, file_okay=True, resolve_path=True,
+                                 help="Target HDF5 file"),
+    limit: int = typer.Option(None, help="Process at most N new samples"),
+    no_skip_existing: bool = typer.Option(False, help="Do not skip already processed basenames"),
+) -> None:
+    processed, skipped = process_all_fn(
+        raw_dir=raw_dir,
+        artifacts_dir=artifacts_dir,
+        h5_path=h5_path,
+        skip_existing=not no_skip_existing,
+        limit=limit,
+    )
+    typer.echo(f"processed={processed} skipped={skipped}")
 
 
 def run() -> None:  # For `python -m hsifoodingr.cli`
