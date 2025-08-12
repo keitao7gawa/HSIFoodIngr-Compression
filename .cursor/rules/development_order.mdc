@@ -1,0 +1,90 @@
+---
+alwaysApply: true
+---
+
+# Development Order: HSIFoodIngr-64 HDF5 Builder
+
+本ファイルは `project.mdc` と `implementation_plan.mdc` を根拠に、最短で安全に価値を出すための「開発順序（実装の段取り）」を具体化します。各ステップは完了基準（DoD）と出力成果物を明確化します。
+
+## 0. 初期セットアップ（Day 0）
+- **目的**: 依存関係を固定し、最小限のパッケージ雛形/CI を整備
+- **作業**:
+  1. ルートに `environment.yml` を作成し、Conda 環境を構築
+  2. パッケージ雛形のディレクトリを作成（`hsifoodingr/`, `tests/`, `data/{raw,h5,artifacts}`）
+  3. `pyproject.toml` か `setup.cfg`（任意）を追加
+  4. ベースの `cli.py`（Typer スケルトン）と `utils/logging.py` を作成
+- **DoD**:
+  - `conda activate hsifoodingr-compression` が成功
+  - `python -m hsifoodingr.cli --help` が実行できる
+
+## 1. フェーズ1の基盤（Manifest / Ingredient Map）
+- **目的**: 冪等な前処理を確立し、完全セット検出と一貫 ID を固定
+- **作業**:
+  1. `processing/manifest.py` 実装（`build-manifest` サブコマンド）
+     - `raw/` 走査 → `artifacts/file_manifest.txt` 出力
+     - 完全セット basename リストも `artifacts/processable.txt` に出力
+  2. `processing/ingredient_map.py` 実装（`build-ingredient-map`）
+     - 全 JSON から ingredient 名を抽出 → ソート → `background:0` で ID 付与
+     - `artifacts/ingredient_map.json` に保存
+- **DoD**:
+  - 両コマンドが成功し、成果物 2 ファイルが生成
+
+## 2. I/O 層の実装（ENVI / PNG / JSON）
+- **目的**: 信頼できる読み込みを先に完成し、以降の処理の土台にする
+- **作業**:
+  1. `io/envi_reader.py`: `.hdr/.dat` を `spectral` で読み、`np.float32 (512,512,204)` を返却
+  2. `io/rgb_reader.py`: PNG → `np.uint8 (512,512,3)`
+  3. `io/json_reader.py`: dish 名、ingredient ポリゴン構造を正規化して返却
+  4. `utils/validators.py`: 形状/型の検証ユーティリティ
+- **DoD**:
+  - 最小のユニットテストが通過（`tests/test_envi_reader.py`）
+
+## 3. マスク生成の実装（Mask Builder）
+- **目的**: ポリゴンから `uint8` マスク生成を確定
+- **作業**:
+  1. `processing/mask_builder.py`: Pillow で塗りつぶし。ingredient ID は `ingredient_map.json` を使用
+  2. 単体テスト `tests/test_mask_builder.py` を実装
+- **DoD**:
+  - 合成データで期待通りの ID が塗られること
+
+## 4. HDF5 出力層の実装（Writer / 初期化）
+- **目的**: HDF5 の初期化・追記 API を完成
+- **作業**:
+  1. `io/hdf5_writer.py`: データセット作成（チャンク/圧縮/属性）、`append_sample()`、`contains(basename)` 実装
+  2. `cli init-h5` 実装（ingredient_map, wavelengths を属性に保存）
+- **DoD**:
+  - 空の H5 が `data/h5/HSIFoodIngr-64.h5` に作成され、構造が `project.mdc` に一致
+
+## 5. 統合パイプライン（Process ループ）
+- **目的**: 1サンプルずつ安全に追記（再開可能、欠損耐性）
+- **作業**:
+  1. `processing/pipeline.py`: フェーズ 1 の成果物と H5 を参照し、未処理 basename を順次処理
+  2. 例外時はスキップしログ保存（`artifacts/failures.log`）
+  3. `cli process` を実装
+- **DoD**:
+  - 小規模の合成/抜粋データで End-to-End が通る
+
+## 6. 検証/要約コマンド
+- **目的**: 品質確保と利用者向けサマリ提供
+- **作業**:
+  1. `cli verify`: 形状/件数/重複/NaN を検証
+  2. `cli summary`: 件数、クラス分布、波長統計を表示
+- **DoD**:
+  - 壊れた H5 を検知し、原因を出力
+
+## 7. 仕上げ（DX/拡張）
+- **目的**: 実運用での快適さと拡張余地
+- **作業**:
+  1. ログの整備（Rich で進捗/表組）
+  2. 並列度オプション（必要に応じて I/O 優先で）
+  3. 可視化ユーティリティ（任意）
+- **DoD**:
+  - 数百サンプルの処理で安定動作
+
+## マイルストーン（推奨スプリント）
+- Sprint 0: 初期セットアップ（章 0）
+- Sprint 1: 前処理基盤（章 1）
+- Sprint 2: I/O 層（章 2-3）
+- Sprint 3: HDF5 層（章 4）
+- Sprint 4: 統合と品質（章 5-6）
+- Sprint 5: 仕上げ（章 7）

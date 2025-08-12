@@ -1,0 +1,15 @@
+name: hsifoodingr-compression
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy>=1.26
+  - h5py>=3.10
+  - pillow>=10
+  - spectral>=0.23
+  - typer>=0.12
+  - rich>=13.7
+  - tqdm>=4.66
+  - pip
+  - pip:
+      - typer[all]>=0.12

@@ -1,0 +1,169 @@
+---
+alwaysApply: false
+---
+
+# Implementation Plan: HSIFoodIngr-64 HDF5 Builder
+
+本ファイルは `HSIFoodIngr-64` データセットを単一の HDF5 に統合するための実装計画、Python プロジェクト構造、Anaconda/Conda 環境構築手順を定義します。内容は `project.mdc` の要件（HDF5 構造・4フェーズ計画）に準拠し、再実行可能・堅牢・高効率を重視します。
+
+## 1. 実装スコープ
+- **入力**: ENVI HSI (`.hdr/.dat` BIL, 512×512×204), RGB (`.png`, 512×512×3), アノテーション (`.json`, 食材ポリゴン)
+- **出力**: 単一の `HSIFoodIngr-64.h5`
+- **要件**:
+  - フェーズ別の再実行性（中断/再開）
+  - 欠損耐性（不完全サンプルはスキップ）
+  - 一貫した ingredient ID マップの生成/固定
+  - 高速アクセスのための HDF5 チャンク・圧縮設計
+  - 進捗とログ（冪等な再実行の判断材料）
+
+## 2. Python プロジェクト構造
+```
+hsifoodingr_compression/
+  ├── hsifoodingr/                    # パッケージルート
+  │   ├── __init__.py
+  │   ├── config.py                   # 既定パス/設定、型安全（pydantic optional）
+  │   ├── cli.py                      # Typer エントリポイント（サブコマンド集約）
+  │   ├── io/
+  │   │   ├── __init__.py
+  │   │   ├── envi_reader.py          # ENVI(.hdr/.dat) 読み込み（spectral）
+  │   │   ├── rgb_reader.py           # PNG 読み込み
+  │   │   ├── json_reader.py          # アノテーション JSON 読み込み
+  │   │   └── hdf5_writer.py          # HDF5 初期化/リサイズ/追記
+  │   ├── processing/
+  │   │   ├── __init__.py
+  │   │   ├── manifest.py             # ファイル走査・完全セット検出・manifest 出力
+  │   │   ├── ingredient_map.py       # グローバル ingredient 名→ID マップ生成
+  │   │   ├── mask_builder.py         # ポリゴン塗りつぶし→整数マスク生成
+  │   │   └── pipeline.py             # フェーズ統合（再開判定・スキップ制御）
+  │   └── utils/
+  │       ├── __init__.py
+  │       ├── logging.py              # Rich ログ/進捗バー
+  │       └── validators.py           # データ検証/寸法/ダタイプチェック
+  ├── tests/
+  │   ├── test_mask_builder.py        # ポリゴン→マスクの単体テスト
+  │   ├── test_envi_reader.py         # ENVI 読み込みの単体テスト（小型ダミー）
+  │   └── test_pipeline_smoke.py      # スモーク（小規模合成データで H5 生成）
+  ├── data/
+  │   ├── raw/                        # 生データ（パッケージ階層）
+  │   ├── h5/                         # 出力 HDF5 保存先（例: HSIFoodIngr-64.h5）
+  │   └── artifacts/                  # manifest/ログ/中間成果物
+  ├── environment.yml                 # Conda 環境
+  ├── pyproject.toml                  # 任意（パッケージ化やツール設定）
+  └── README.md                       # 任意（使い方）
+```
+
+### 主要モジュールの責務
+- `io/envi_reader.py`: spectral を用いた ENVI ヘッダ/データ読み込み（BIL, float32 正規化を保持）
+- `io/hdf5_writer.py`: HDF5 初期化（データセット/属性）、チャンク/圧縮設定、追記時の `resize` と整合性チェック
+- `processing/manifest.py`: ディレクトリ走査、basename 単位で `.hdr/.dat/.png/.json` 同時存在を検出、`file_manifest.txt` 出力
+- `processing/ingredient_map.py`: 全 JSON を走査しユニーク食材名を抽出、ID 付与（`{"background":0, ...}`）
+- `processing/mask_builder.py`: JSON ポリゴンを `Pillow.ImageDraw` で塗りつぶし、`uint8` マスク生成
+- `processing/pipeline.py`: フェーズ 1-4 の統合、既処理 basename のスキップ、例外/欠損処理、再開性
+- `cli.py`: Typer サブコマンドを提供（下記）
+
+## 3. CLI コマンド設計（Typer）
+- `build-manifest`: `raw/` を再帰走査し `artifacts/file_manifest.txt` を作成
+- `build-ingredient-map`: 全 JSON から ingredient 一覧と ID マップを生成し `artifacts/ingredient_map.json` に保存
+- `init-h5`: HDF5 を新規作成し、データセット/属性（wavelengths, ingredient_map）を設定
+- `process`: マニフェストに基づき未処理 basename を順次追記（中断後の再実行可）
+- `verify`: H5 とメタデータの整合性チェック（件数、重複、NaN, 形状など）
+- `summary`: H5 の概要表示（件数、クラス分布、帯域情報など）
+
+それぞれ `--raw-dir`, `--h5-path`, `--artifacts-dir`, `--num-workers` などのオプションを持ちます。
+
+## 4. HDF5 設計（`project.mdc` に準拠）
+- データセット:
+  - `/hsi`: `float32`, 形状 `(N, 512, 512, 204)`
+  - `/rgb`: `uint8`, 形状 `(N, 512, 512, 3)`
+  - `/masks`: `uint8`, 形状 `(N, 512, 512)`
+- メタデータ:
+  - `/metadata/image_basenames`: vlen str `(N,)`
+  - `/metadata/dish_labels`: vlen str `(N,)`
+  - `/metadata/ingredient_map`: vlen str `(1,)`（JSON 文字列）
+  - `/metadata/wavelengths`: `float32 (204,)`
+- 圧縮/チャンク指針（推奨）:
+  - 圧縮: `compression="gzip"`, `compression_opts=4`（バランス重視）
+  - フィルタ: `shuffle=True`
+  - チャンク例:
+    - `hsi`: `(1, 64, 64, 32)`
+    - `rgb`: `(1, 128, 128, 3)`
+    - `masks`: `(1, 128, 128)`
+
+## 5. フェーズ別実装要約（再実行性）
+- フェーズ1: マニフェスト生成、ingredient マップ確定、完全セット basename 抽出
+- フェーズ2: HDF5 初期化（存在時は属性/データセット検証）
+- フェーズ3: 追記ループ
+  - 先に `/metadata/image_basenames` を集合化し存在チェック
+  - 各 basename について：ENVI 读取→RGB→JSON→マスク作成→同一インデックスに同時書込
+  - 例外時はログ記録し継続（欠損/壊れたファイルはスキップ）
+- フェーズ4: クローズ、検証、要約
+
+## 6. 高速化とメモリ戦略
+- 一度に 1 サンプルずつ追記（ピークメモリ抑制）
+- I/O バッファリングとチャンク整合
+- 波長配列や ingredient マップはメモリ常駐（小容量）
+- 進捗表示（tqdm）
+
+## 7. 例外処理・バリデーション
+- 形状/型: ENVI→`float32`, RGB→`uint8`, mask→`uint8`
+- 値域: HSI（元が float、スケーリング/正規化は保持方針を明示）
+- JSON 構造検証（必須フィールド: dish, ingredients, polygons）
+- オーバーラップポリゴンの合成順序（後勝ち/優先度）を明示（基本は後勝ち）
+
+## 8. Conda 環境（environment.yml）
+`environment.yml`（ルート）例:
+```yaml
+name: hsifoodingr-compression
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy>=1.26
+  - h5py>=3.10
+  - pillow>=10
+  - spectral>=0.23
+  - typer>=0.12
+  - rich>=13.7
+  - tqdm>=4.66
+  - pip
+  - pip:
+      - typer[all]>=0.12  # 補助（tab 補完等）
+```
+インストール手順:
+```bash
+conda env create -f environment.yml
+conda activate hsifoodingr-compression
+```
+（任意）開発支援:
+```bash
+pip install pytest pre-commit
+pre-commit install
+```
+
+## 9. 運用コマンド例（CLI; 後述の `cli.py` 実装）
+```bash
+# マニフェスト作成
+python -m hsifoodingr.cli build-manifest --raw-dir data/raw --artifacts-dir data/artifacts
+
+# ingredient マップ作成
+python -m hsifoodingr.cli build-ingredient-map --raw-dir data/raw --artifacts-dir data/artifacts
+
+# HDF5 初期化（波長 CSV 等があれば指定）
+python -m hsifoodingr.cli init-h5 --h5-path data/h5/HSIFoodIngr-64.h5 \
+  --ingredient-map data/artifacts/ingredient_map.json --wavelengths data/artifacts/wavelengths.csv
+
+# 本処理（追記・再開可能）
+python -m hsifoodingr.cli process --raw-dir data/raw --h5-path data/h5/HSIFoodIngr-64.h5 \
+  --artifacts-dir data/artifacts --num-workers 1
+
+# 検証・要約
+python -m hsifoodingr.cli verify --h5-path data/h5/HSIFoodIngr-64.h5
+python -m hsifoodingr.cli summary --h5-path data/h5/HSIFoodIngr-64.h5
+```
+
+## 10. 将来拡張
+- 並列 I/O（ディスク/CPU バランスを見て `ProcessPoolExecutor` 等を適用）
+- 画像圧縮設定のチューニング（LZF 等）
+- `ingredient_map` の変更検知と拒否（既存 H5 との不整合防止）
+- 可視化ユーティリティ（RGB/マスクオーバーレイのクイックビュー）
+
