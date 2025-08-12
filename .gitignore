@@ -5,3 +5,4 @@ __pycache__/
 *.hdr
 *.png
 data/
+tests/
