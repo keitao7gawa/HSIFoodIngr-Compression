@@ -56,13 +56,36 @@ def process_all(
     h5_path: Path,
     skip_existing: bool = True,
     limit: Optional[int] = None,
+    allow_missing_json: bool = False,
 ) -> Tuple[int, int]:
     """Process all samples into HDF5. Returns (num_processed, num_skipped)."""
     raw_dir = Path(raw_dir)
     artifacts_dir = Path(artifacts_dir)
     h5_path = Path(h5_path)
 
-    items = _ensure_manifest(raw_dir, artifacts_dir)
+    # Decide how to enumerate items
+    if allow_missing_json:
+        # Build items from available triplets (.hdr, .dat, .png); JSON optional
+        files = [p for p in raw_dir.rglob("*") if p.is_file()]
+        from .manifest import _group_by_basename  # type: ignore
+
+        groups = _group_by_basename(files)
+        items: List[Dict[str, str]] = []
+        for basename, paths in groups.items():
+            mapping = {p.suffix.lower(): p for p in paths}
+            if all(k in mapping for k in [".hdr", ".dat", ".png"]):
+                items.append(
+                    {
+                        "basename": basename,
+                        "hdr": str(mapping[".hdr"]),
+                        "dat": str(mapping[".dat"]),
+                        "png": str(mapping[".png"]),
+                        "json": str(mapping[".json"]) if ".json" in mapping else "",
+                    }
+                )
+        items.sort(key=lambda d: d["basename"])  # stable order
+    else:
+        items = _ensure_manifest(raw_dir, artifacts_dir)
     if not items:
         logger.warning("No processable items found under %s", raw_dir)
         return 0, 0
@@ -104,7 +127,11 @@ def process_all(
                 # Read inputs
                 hsi = envi_reader_module.read_envi_hsi(Path(item["hdr"]), Path(item["dat"]))
                 rgb = rgb_reader_module.read_rgb(Path(item["png"]))
-                ann = json_reader_module.read_annotation(Path(item["json"]))
+                ann_path_str = item.get("json", "")
+                if ann_path_str and Path(ann_path_str).exists():
+                    ann = json_reader_module.read_annotation(Path(ann_path_str))
+                else:
+                    ann = json_reader_module.Annotation(dish="", ingredients=[])
 
                 # Build mask
                 height, width = int(hsi.shape[0]), int(hsi.shape[1])
