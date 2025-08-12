@@ -4,3 +4,4 @@ __pycache__/
 *.dat
 *.hdr
 *.png
+data/
