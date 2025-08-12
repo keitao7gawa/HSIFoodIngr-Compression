@@ -1,0 +1,109 @@
+---
+alwaysApply: true
+---
+
+# Project: HSIFoodIngr-64 Compression & Packaging
+
+## Overview
+This project aims to convert the HSIFoodIngr-64 dataset (3,389 pairs of HSI+RGB food images, 21 dish classes, and 64 ingredient categories) into a unified HDF5 format for efficient storage and fast access.
+
+The original data is provided in ENVI format (HDR/DAT) for hyperspectral images (512x512x204, BIL format, floating point), paired with 512x512 RGB images and ingredient-level polygon masks in JSON format.
+
+After conversion, the HDF5 file will store image data and annotation data in a hierarchical structure, balancing access speed and storage efficiency.
+
+## 1. Project Goal
+The primary objective of this project is to process and compress the HSIFoodIngr-64 dataset. The original dataset, consisting of thousands of individual files (.hdr, .dat, .png, .json), will be consolidated into a single, efficient HDF5 (.h5) file. This new format will be optimized for fast data loading and preprocessing in machine learning workflows, particularly for food-related image segmentation and classification tasks.
+
+## 2. Input Data Structure
+The source dataset for each image index * consists of four files:
+
+REFLECTANCE_*.hdr: ENVI header file containing metadata for the HSI cube (dimensions, bands, data type).
+
+REFLECTANCE_*.dat: Binary HSI data cube with dimensions (512, 512, 204).
+
+REFLECTANCE_*.png: Corresponding RGB image with dimensions (512, 512, 3).
+
+REFLECTANCE_*.json: Label file containing dish/ingredient names and pixel-wise segmentation masks as polygon coordinates.
+
+
+## 3. Proposed HDF5 File Structure
+```
+HSIFoodIngr.h5
+├── hsi (Dataset)
+│   - Description: Hyperspectral image data.
+│   - Dtype: float32
+│   - Shape: (3389, 512, 512, 204)
+│   - Attributes:
+│     - 'description': 'Hyperspectral data cubes (width, height, bands).'
+│
+├── rgb (Dataset)
+│   - Description: Standard RGB image data.
+│   - Dtype: uint8
+│   - Shape: (3389, 512, 512, 3)
+│   - Attributes:
+│     - 'description': 'RGB images corresponding to HSI data.'
+│
+├── masks (Dataset)
+│   - Description: Pixel-wise ingredient segmentation masks. Each pixel value is an integer ID corresponding to an ingredient class.
+│   - Dtype: uint8
+│   - Shape: (3389, 512, 512)
+│   - Attributes:
+│     - 'description': 'Integer-based segmentation masks. See /metadata/ingredient_map for class labels.'
+│
+└── metadata (Group)
+    ├── image_basenames (Dataset)
+    │   - Description: The original base filenames (e.g., 'REFLECTANCE_0001') to link back to source files.
+    │   - Dtype: vlen str (variable-length string)
+    │   - Shape: (3389,)
+    │
+    ├── dish_labels (Dataset)
+    │   - Description: The dish name for each image.
+    │   - Dtype: vlen str
+    │   - Shape: (3389,)
+    │
+    ├── ingredient_map (Dataset)
+    │   - Description: A JSON string mapping integer IDs from the 'masks' dataset to human-readable ingredient names.
+    │   - Dtype: vlen str
+    │   - Shape: (1,)
+    │
+    └── wavelengths (Dataset)
+        - Description: The wavelength value for each of the 204 HSI bands.
+        - Dtype: float32
+        - Shape: (204,)
+
+```
+
+## 4. Robust, Iterative Processing Plan
+This plan is designed to handle a dataset distributed across multiple directories (packages) and to be resilient to missing files. The script will process data package-by-package, allowing for interruption and resumption.
+
+Phase 1: Pre-flight & Manifest Generation
+
+    - Create File Manifest: Recursively scan the main data directory (e.g., raw/) and save a list of all found file paths to a text file named file_manifest.txt. This serves as a record of all original files for later verification.
+    - Build Global Ingredient Map: Scan all available .json files across all packages to build a comprehensive, sorted list of unique ingredient names. Create a definitive mapping from ingredient name to an integer ID (e.g., {"background": 0, "Avocado": 1, ...}). This must be done first to ensure consistent IDs across all data.
+    - Identify Processable Images: Identify all image indices that have a complete set of files (.hdr, .dat, .png, and .json). Store these valid basenames (e.g., REFLECTANCE_218) in a list. This list will guide the main processing loop.
+
+Phase 2: HDF5 File Initialization
+
+    - Create or open the HSIFoodIngr-64.h5 file in append mode ('a').
+    - If the file is new, initialize the datasets (hsi, rgb, masks, image_basenames, dish_labels) with an initial size of 0 and a maxshape that allows for unlimited resizing on the first axis (e.g., maxshape=(None, 512, 512, 204)).
+    - Store the global ingredient_map and wavelengths data in the metadata group.
+
+Phase 3: Iterative Data Processing Loop
+
+    - Iterate through each data package directory (e.g., raw/HSIFoodIngr-64_data_1, raw/HSIFoodIngr-64_data_2, ...).
+    - For each directory, iterate through the list of processable image basenames identified in Phase 1.
+    - Check if Already Processed: Before processing an image, check if its basename already exists in the /metadata/image_basenames dataset in the HDF5 file. If it does, skip to the next image.
+
+    Process New Image: 
+        a.  Read Data: Load the .dat, .png, and .json files for the current basename.
+        b.  Create Mask: Generate the segmentation mask by drawing polygons from the JSON data onto a NumPy array, using the global ingredient map for integer IDs.
+        c.  Append to HDF5:
+        * Get the current size of the datasets (e.g., current_size = h5_file['hsi'].shape[0]).
+        * Resize all resizable datasets to current_size + 1.
+        * Write the new HSI, RGB, mask, basename, and dish label data into the newly created slot at index current_size.
+
+Phase 4: Finalization
+
+    - After the loop over all packages has completed, the script will have incrementally built the complete HDF5 file.
+    - Close the HDF5 file to ensure all data is written to disk.
+    - The script can be re-run at any time to process new data packages that are added to the raw/ directory.
