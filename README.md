@@ -1,6 +1,6 @@
 # HSIFoodIngr-64 Compression & Packaging
 
-A practical CLI to convert the HSIFoodIngr-64 dataset (3,389 HSI+RGB pairs, 21 dishes, 64 ingredients) into a single, efficient HDF5 file for fast ML workflows.
+A practical CLI to convert the [HSIFoodIngr-64 dataset](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/E7WDNQ)[^1] (3,389 HSI+RGB pairs, 21 dishes, 64 ingredients) into a single, efficient HDF5 file for fast ML workflows.
 
 - Unifies ENVI HSI cubes (`.hdr/.dat`), RGB images (`.png`), and JSON annotations into one `.h5`
 - Incremental, resumable processing with manifests and failure logs
@@ -124,7 +124,7 @@ python -m hsifoodingr.cli summary --help
 
 # HSIFoodIngr-64 圧縮・パッケージング（日本語）
 
-HSIFoodIngr-64 データセット（HSI+RGB ペア 3,389 件、21 種類の料理、64 種の食材）を、高速アクセス可能な HDF5 に統合する CLI です。
+[HSIFoodIngr-64 データセット](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/E7WDNQ)[^1]（HSI+RGB ペア 3,389 件、21 種類の料理、64 種の食材）を、高速アクセス可能な HDF5 に統合する CLI です。
 
 - ENVI 形式の HSI（`.hdr/.dat`）・RGB（`.png`）・アノテーション（`.json`）を単一の `.h5` に統合
 - マニフェストと失敗ログにより安全・冪等・再開可能
@@ -221,3 +221,5 @@ HSIFoodIngr-64.h5
   pytest -q
   ```
 - コード方針：Python 3.11、明示的な shape/dtype、早期 return、過度なネスト回避。
+
+[^1]: X. Xia, W. Liu, L. Wang and J. Sun, "HSIFoodIngr-64: A Dataset for Hyperspectral Food-Related Studies and a Benchmark Method on Food Ingredient Retrieval," in IEEE Access, vol. 11, pp. 13152-13162, 2023, doi: 10.1109/ACCESS.2023.3243243. 
