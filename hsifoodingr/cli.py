@@ -11,6 +11,7 @@ from .processing import build_ingredient_map as build_ingredient_map_fn
 from .processing import verify_h5 as verify_h5_fn
 from .processing import summarize_h5 as summarize_h5_fn
 from .processing import VerifyConfig as VerifyConfigCls
+from .processing.progress import compute_progress as compute_progress_fn
 from .io.hdf5_writer import initialize_h5
 from .processing.pipeline import process_all as process_all_fn
 
@@ -140,6 +141,36 @@ def summary(
         typer.echo("top dishes:")
         for name, cnt in s.top_dishes:
             typer.echo(f" - {name}: {cnt}")
+
+
+@app.command("progress")
+def progress(
+    raw_dir: Path = typer.Option(Path("data/raw"), exists=True, file_okay=False, resolve_path=True,
+                                 help="Root directory of raw data"),
+    h5_path: Path = typer.Option(Path("data/h5/HSIFoodIngr-64.h5"), exists=False, file_okay=True, resolve_path=True,
+                                 help="Target HDF5 file (if exists, used to detect processed basenames)"),
+    show_lists: bool = typer.Option(False, help="Print basenames lists for each category"),
+) -> None:
+    p = compute_progress_fn(raw_dir=raw_dir, h5_path=h5_path)
+    typer.echo(f"basenames total: {p.total_basenames}")
+    typer.echo(f"complete (all 4 files exist): {p.complete_total}")
+    typer.echo(f"processed (in H5): {p.processed}")
+    typer.echo(f"ready (complete but not processed): {p.ready_unprocessed}")
+    typer.echo(f"incomplete (missing files): {p.incomplete}")
+    if show_lists:
+        if p.processed_basenames:
+            typer.echo("processed:")
+            for b in p.processed_basenames:
+                typer.echo(f" - {b}")
+        if p.ready_unprocessed_basenames:
+            typer.echo("ready:")
+            for b in p.ready_unprocessed_basenames:
+                typer.echo(f" - {b}")
+        if p.incomplete_basenames:
+            typer.echo("incomplete:")
+            for b in p.incomplete_basenames:
+                missing = ",".join(p.missing_by_basename.get(b, []))
+                typer.echo(f" - {b} (missing: {missing})")
 
 
 def run() -> None:  # For `python -m hsifoodingr.cli`
