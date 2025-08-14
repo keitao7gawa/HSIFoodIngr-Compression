@@ -8,6 +8,33 @@ A practical CLI to convert the [HSIFoodIngr-64 dataset](https://dataverse.harvar
 
 ## Quick start
 
+### Download dataset (optional)
+
+You can fetch the full HSIFoodIngr-64 dataset directly from Harvard Dataverse via the built-in downloader.
+
+```bash
+# API key can be passed via --api-key or environment variable DATAVERSE_API_KEY
+export DATAVERSE_API_KEY="<your_key_here>"   # optional (may be required depending on access)
+
+python -m hsifoodingr.cli download \
+  --output-dir data/raw \
+  --extract-dir data/raw \
+  --resume \
+  --persistent-id doi:10.7910/DVN/E7WDNQ
+
+# After extraction, proceed with manifest/ingredient_map and processing
+```
+
+- Options:
+  - **--output-dir**: where to place the downloaded ZIP (and extracted files); default `data/raw`
+  - **--api-key / $DATAVERSE_API_KEY**: Dataverse API key
+  - **--base-url**: Dataverse base URL (default `https://dataverse.harvard.edu`)
+  - **--persistent-id**: dataset persistent ID (default `doi:10.7910/DVN/E7WDNQ`)
+  - **--resume/--no-resume**: resume partial ZIP downloads (default: resume)
+  - **--force**: re-download even if ZIP exists
+  - **--extract/--no-extract**: extract after download (default: extract)
+  - **--extract-dir**: destination for extracted files (default: same as `--output-dir`)
+
 ### 1) Install environment
 
 ```bash
@@ -131,6 +158,33 @@ python -m hsifoodingr.cli summary --help
 - 構造検証と要約出力で品質確認
 
 ## 使い方（概要）
+
+### データセットのダウンロード（任意）
+
+Harvard Dataverse から内蔵ダウンローダで一括取得できます。
+
+```bash
+# API キーは --api-key か環境変数 DATAVERSE_API_KEY で指定可能
+export DATAVERSE_API_KEY="<your_key_here>"   # 必要に応じて
+
+python -m hsifoodingr.cli download \
+  --output-dir data/raw \
+  --extract-dir data/raw \
+  --resume \
+  --persistent-id doi:10.7910/DVN/E7WDNQ
+
+# 展開後は通常どおりマニフェスト作成・処理に進みます
+```
+
+- オプション:
+  - **--output-dir**: ZIP と展開先のディレクトリ（既定: `data/raw`）
+  - **--api-key / $DATAVERSE_API_KEY**: Dataverse API キー
+  - **--base-url**: Dataverse ベース URL（既定: `https://dataverse.harvard.edu`）
+  - **--persistent-id**: データセット Persistent ID（既定: `doi:10.7910/DVN/E7WDNQ`）
+  - **--resume/--no-resume**: 途中の ZIP を再開（既定: 再開する）
+  - **--force**: ZIP があっても再ダウンロード
+  - **--extract/--no-extract**: ダウンロード後に展開（既定: 展開する）
+  - **--extract-dir**: 展開先（既定: `--output-dir` と同じ）
 
 ### 1) 環境構築
 

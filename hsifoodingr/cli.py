@@ -14,6 +14,9 @@ from .processing import VerifyConfig as VerifyConfigCls
 from .processing.progress import compute_progress as compute_progress_fn
 from .io.hdf5_writer import initialize_h5
 from .processing.pipeline import process_all as process_all_fn
+from .download.downloader import download_dataset as download_dataset_fn
+from .download.downloader import extract_zip as extract_zip_fn
+from .download.downloader import DownloadOptions as DownloadOptionsCls
 
 app = typer.Typer(add_completion=False, help="HSIFoodIngr-64 HDF5 builder CLI")
 
@@ -171,6 +174,33 @@ def progress(
             for b in p.incomplete_basenames:
                 missing = ",".join(p.missing_by_basename.get(b, []))
                 typer.echo(f" - {b} (missing: {missing})")
+
+
+@app.command("download")
+def download(
+    output_dir: Path = typer.Option(Path("data/raw"), file_okay=False, resolve_path=True, help="Output directory"),
+    api_key: str | None = typer.Option(None, envvar="DATAVERSE_API_KEY", help="Dataverse API key"),
+    base_url: str = typer.Option("https://dataverse.harvard.edu", help="Dataverse base URL"),
+    persistent_id: str = typer.Option("doi:10.7910/DVN/E7WDNQ", help="Dataset persistent ID"),
+    resume: bool = typer.Option(True, help="Resume partial downloads"),
+    force: bool = typer.Option(False, help="Force re-download (overwrite ZIP)"),
+    extract: bool = typer.Option(True, help="Extract ZIP after download"),
+    extract_dir: Path | None = typer.Option(None, file_okay=False, resolve_path=True, help="Extraction directory (defaults to output_dir)"),
+) -> None:
+    opts = DownloadOptionsCls(
+        output_dir=output_dir,
+        api_key=api_key,
+        base_url=base_url,
+        persistent_id=persistent_id,
+        resume=resume,
+        force=force,
+    )
+    zip_path = download_dataset_fn(opts)
+    typer.echo(str(zip_path))
+    if extract:
+        dest = extract_dir if extract_dir else output_dir
+        extract_zip_fn(zip_path, dest)
+        typer.echo(str(dest))
 
 
 def run() -> None:  # For `python -m hsifoodingr.cli`

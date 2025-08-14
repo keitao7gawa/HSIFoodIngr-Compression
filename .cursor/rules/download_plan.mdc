@@ -1,0 +1,97 @@
+# HSIFoodIngr-64 データセットダウンロード機能 開発計画
+
+## 概要
+HSIFoodIngr-64データセットをHarvard Dataverseから自動ダウンロードするCLI機能を実装する．
+
+## 対象データセット
+- **URL**: https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/E7WDNQ&version=&q=&fileTypeGroupFacet=&fileAccess=&tagPresort=true&folderPresort=true
+- **Persistent ID**: doi:10.7910/DVN/E7WDNQ
+- **データセット名**: HSIFoodIngr-64
+
+## 実装方法
+Harvard DataverseのData Access APIを使用してデータセット全体をダウンロードする．
+
+### 参考API仕様
+- **API ドキュメント**: https://guides.dataverse.org/en/latest/api/dataaccess.html#download-by-dataset-api
+- **エンドポイント**: `/api/access/dataset/:persistentId`
+- **機能**: データセット内の全ファイルをZIPバンドルとしてダウンロード
+
+## 開発フェーズ
+
+### フェーズ1: 基盤実装
+1. **依存関係追加**
+   - `requests`ライブラリの追加（HTTP通信）
+   - `tqdm`ライブラリの追加（プログレスバー表示）
+
+2. **CLIコマンド追加**
+   - `hsifoodingr download` サブコマンドの実装
+   - 基本オプション（出力ディレクトリ，APIキー等）
+
+### フェーズ2: ダウンロード機能実装
+1. **API通信層**
+   - Dataverse APIクライアントクラスの実装
+   - 認証・エラーハンドリング
+   - レート制限対応
+
+2. **ダウンロード処理**
+   - ZIPファイルのダウンロード
+   - プログレス表示
+   - 一時ファイル管理
+
+### フェーズ3: 統合・検証
+1. **既存パイプラインとの統合**
+   - ダウンロード完了後の自動展開
+   - ファイル整合性チェック
+
+2. **エラーハンドリング**
+   - ネットワークエラー対応
+   - 部分ダウンロードからの再開機能
+
+## 実装詳細
+
+### CLIコマンド仕様
+```bash
+hsifoodingr download [OPTIONS]
+  --output-dir PATH    出力ディレクトリ（デフォルト: data/raw）
+  --api-key TEXT       Dataverse APIキー
+  --force             既存ファイルの上書き
+  --resume            中断されたダウンロードの再開
+```
+
+### ファイル構造
+```
+hsifoodingr/
+├── cli.py              # メインCLI（downloadサブコマンド追加）
+├── download/
+│   ├── __init__.py
+│   ├── dataverse_client.py    # Dataverse APIクライアント
+│   ├── downloader.py          # ダウンロード処理
+│   └── utils.py               # ユーティリティ関数
+└── utils/
+    └── progress.py            # プログレス表示（拡張）
+```
+
+### エラーハンドリング
+- ネットワークタイムアウト
+- API制限（レート制限）
+- ディスク容量不足
+- 部分ダウンロードからの再開
+
+## 完了基準（DoD）
+1. `hsifoodingr download`コマンドが正常実行される
+2. 指定されたデータセットが正常にダウンロードされる
+3. プログレス表示が適切に動作する
+4. エラー時の適切なメッセージ表示
+5. 既存のパイプラインと統合されている
+
+## 注意事項
+- Harvard Dataverseの利用規約に準拠
+- APIキーの適切な管理（環境変数での設定推奨）
+- 大容量データセットのダウンロード時間考慮
+- ネットワーク環境に応じたタイムアウト設定
+
+## 参考リンク
+- [Harvard Dataverse Data Access API](https://guides.dataverse.org/en/latest/api/dataaccess.html#download-by-dataset-api)
+- [HSIFoodIngr-64 Dataset](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/E7WDNQ&version=&q=&fileTypeGroupFacet=&fileAccess=&tagPresort=true&folderPresort=true)
+alwaysApply: false
+---

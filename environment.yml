@@ -10,6 +10,7 @@ dependencies:
   - typer>=0.12
   - rich>=13.7
   - tqdm>=4.66
+  - requests>=2.32.3
   - pip
   - pip:
       - typer[all]>=0.12
