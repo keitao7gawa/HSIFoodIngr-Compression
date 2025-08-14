@@ -1,6 +1,7 @@
 name: hsifoodingr-compression
 channels:
   - defaults
+  - conda-forge
 dependencies:
   - h5py[version='>=3.10']
   - numpy[version='>=1.26']
