@@ -4,5 +4,9 @@ __pycache__/
 *.dat
 *.hdr
 *.png
+
 data/
 tests/
+!data/artifacts/
+data/artifacts/*
+!data/artifacts/wavelengths.txt
