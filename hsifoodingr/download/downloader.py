@@ -4,10 +4,11 @@ import shutil
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict
 
 from ..utils import get_logger
 from .dataverse_client import DataverseClient, DataverseClientConfig
+from tqdm import tqdm
 
 logger = get_logger(__name__)
 
@@ -23,17 +24,36 @@ class DownloadOptions:
 
 
 def download_dataset(options: DownloadOptions) -> Path:
+    """Download dataset by iterating files individually into output_dir.
+
+    Returns a marker file path indicating completion of listing (not a zip).
+    """
     options.output_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = options.output_dir / "HSIFoodIngr-64.zip"
+    client = DataverseClient(DataverseClientConfig(base_url=options.base_url, api_key=options.api_key))
 
-    if zip_path.exists() and not options.force and not options.resume:
-        logger.info("ZIP already exists and neither --force nor --resume specified: %s", zip_path)
-        return zip_path
+    # Get file list
+    files: List[Dict] = client.get_file_list(options.persistent_id)
+    if not files:
+        logger.warning("No files returned by dataset listing")
+        return options.output_dir / ".download_empty"
 
-    client = DataverseClient(
-        DataverseClientConfig(base_url=options.base_url, api_key=options.api_key)
-    )
-    return client.download_dataset_zip(options.persistent_id, zip_path, resume=options.resume)
+    # Loop with a file-level progress bar
+    for meta in tqdm(files, desc="Files", unit="file"):
+        file_id = int(meta["id"])
+        rel_dir = meta.get("directoryLabel") or ""
+        filename = str(meta.get("filename"))
+        filesize = meta.get("filesize")
+        target_dir = options.output_dir / rel_dir if rel_dir else options.output_dir
+        target_path = target_dir / filename
+
+        if target_path.exists() and not options.force:
+            continue
+
+        client.download_file_by_id(file_id=file_id, dest_path=target_path, total_size=filesize, resume=options.resume)
+
+    marker = options.output_dir / ".download_complete"
+    marker.write_text("ok")
+    return marker
 
 
 def extract_zip(zip_path: Path, dest_dir: Path, overwrite: bool = False) -> Path:

@@ -9,12 +9,24 @@ HSIFoodIngr-64データセットをHarvard Dataverseから自動ダウンロー�
 - **データセット名**: HSIFoodIngr-64
 
 ## 実装方法
-Harvard DataverseのData Access APIを使用してデータセット全体をダウンロードする．
+Harvard DataverseのNative APIおよびData Access APIを組み合わせ、2段階のプロセスでダウンロードを実行する。
 
+1. ファイルリストの取得
+   データセットに含まれる全ファイルのメタデータ（ファイルID、ファイル名）をリストとして取得する。
+   - エンドポイント: GET /api/datasets/:persistentId/versions/:latest
+2. 個別ファイルのダウンロード
+   取得したファイルリストをループ処理し、ファイルIDを元に各ファイルを個別にダウンロードする。
+   - エンドポイント: GET /api/access/datafile/{id}
 ### 参考API仕様
 - **API ドキュメント**: https://guides.dataverse.org/en/latest/api/dataaccess.html#download-by-dataset-api
-- **エンドポイント**: `/api/access/dataset/:persistentId`
-- **機能**: データセット内の全ファイルをZIPバンドルとしてダウンロード
+- **エンドポイント**: `/api/datasets/:persistentId/versions/:latest`
+- **機能**: データセットのメタデータとファイルリストを取得
+- **レスポンス形式**: JSON（ファイルID、ファイル名、サイズ等を含む）
+
+- **API ドキュメント**: https://guides.dataverse.org/en/latest/api/dataaccess.html#download-by-file-id
+- **エンドポイント**: `/api/access/datafile/{id}`
+- **機能**: ファイルIDを指定して個別ファイルをダウンロード
+- **レスポンス形式**: バイナリデータ（ファイルの実体）
 
 ## 開発フェーズ
 
@@ -28,15 +40,34 @@ Harvard DataverseのData Access APIを使用してデータセット全体をダ
    - 基本オプション（出力ディレクトリ，APIキー等）
 
 ### フェーズ2: ダウンロード機能実装
-1. **API通信層**
-   - Dataverse APIクライアントクラスの実装
-   - 認証・エラーハンドリング
-   - レート制限対応
 
-2. **ダウンロード処理**
-   - ZIPファイルのダウンロード
-   - プログレス表示
-   - 一時ファイル管理
+#### API通信層 (dataverse_client.py)
+1. **Dataverse APIクライアントクラス**
+   - 基本設定（エンドポイント，タイムアウト等）
+   - セッション管理と認証
+   - レート制限への対応
+
+2. **ファイルリスト取得機能**
+   - メソッド: `get_file_list()`
+   - データセットメタデータの解析
+   - ファイルIDとパス情報の抽出
+
+3. **個別ファイルダウンロード**
+   - メソッド: `download_file_by_id()`
+   - チャンク単位での効率的なダウンロード
+   - プログレス表示対応
+   - エラーハンドリング
+
+#### ダウンロード処理 (downloader.py)
+1. **一括ダウンロード機能**
+   - ファイルリストに基づく逐次ダウンロード
+   - ファイル数ベースのプログレス表示（例: [35/189]）
+   - 並行ダウンロードの制御
+
+2. **再開機能**
+   - 一時ファイルの管理
+   - チェックポイント保存
+   - 部分ダウンロードからの再開処理
 
 ### フェーズ3: 統合・検証
 1. **既存パイプラインとの統合**

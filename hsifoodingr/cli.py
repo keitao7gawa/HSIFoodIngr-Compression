@@ -183,9 +183,7 @@ def download(
     base_url: str = typer.Option("https://dataverse.harvard.edu", help="Dataverse base URL"),
     persistent_id: str = typer.Option("doi:10.7910/DVN/E7WDNQ", help="Dataset persistent ID"),
     resume: bool = typer.Option(True, help="Resume partial downloads"),
-    force: bool = typer.Option(False, help="Force re-download (overwrite ZIP)"),
-    extract: bool = typer.Option(True, help="Extract ZIP after download"),
-    extract_dir: Path | None = typer.Option(None, file_okay=False, resolve_path=True, help="Extraction directory (defaults to output_dir)"),
+    force: bool = typer.Option(False, help="Force re-download for existing files"),
 ) -> None:
     opts = DownloadOptionsCls(
         output_dir=output_dir,
@@ -195,12 +193,8 @@ def download(
         resume=resume,
         force=force,
     )
-    zip_path = download_dataset_fn(opts)
-    typer.echo(str(zip_path))
-    if extract:
-        dest = extract_dir if extract_dir else output_dir
-        extract_zip_fn(zip_path, dest)
-        typer.echo(str(dest))
+    marker = download_dataset_fn(opts)
+    typer.echo(str(marker))
 
 
 def run() -> None:  # For `python -m hsifoodingr.cli`
