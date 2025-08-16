@@ -134,7 +134,7 @@ hsifoodingr process-archives \
 - 【解凍ユーティリティ】`hsifoodingr/utils/archive.py`
   - `detect_archive_type(path: Path) -> Literal["zip", "tar", "targz", "tarxz", "zip-targz", "unknown"]`
   - `safe_extract(archive_path: Path, dest_root: Path) -> Path`
-    - 複合拡張（例: `.zip.tar.gz`）は段階的に展開し、最終展開ディレクトリを返す
+    - 複合拡張（例: `.zip.tar.gz`）や多段ネスト（例: `.../HSIFoodIngr-64_data_101/HSIFoodIngr-64_data_101.zip`）を検知し、再帰的に展開して最終ディレクトリを返す
     - ディレクトリトラバーサル対策（パス正規化、`..` 禁止）
   - `cleanup_path(path: Path)` 安全削除（存在しない場合は no-op）
 

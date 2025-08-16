@@ -71,6 +71,23 @@ def _safe_extract_zip(zf: zipfile.ZipFile, dest: Path) -> None:
                 dst.write(src.read())
 
 
+def _find_nested_archive(root: Path) -> Path | None:
+    """Find a nested archive within root; prefer .zip, then tar variants."""
+    candidates = []
+    for p in root.rglob("*"):
+        if not p.is_file():
+            continue
+        name = p.name.lower()
+        if name.endswith(".zip"):
+            candidates.append((0, p))
+        elif name.endswith((".tar", ".tar.gz", ".tgz", ".tar.xz", ".txz")):
+            candidates.append((1, p))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: (t[0], len(str(t[1]))))
+    return candidates[0][1]
+
+
 def safe_extract(archive_path: Path, dest_root: Path) -> Path:
     """Safely extract archives, supporting nested multi-extensions.
 
@@ -88,26 +105,12 @@ def safe_extract(archive_path: Path, dest_root: Path) -> Path:
     current_input = archive_path
     current_output = work_dir
 
-    # Iterate while current input still looks like an archive after a step
-    # Limit iterations to prevent infinite loops
-    for _ in range(3):
+    # Iterate while we keep discovering nested archives inside the output
+    for _ in range(5):
         lower = current_input.name.lower()
         if lower.endswith(".zip"):
             with zipfile.ZipFile(current_input, "r") as zf:
                 _safe_extract_zip(zf, current_output)
-            # After extracting a .zip, stop unless there is a single .tar.* file
-            # Try to detect next nested archive
-            nested = None
-            for p in current_output.rglob("*"):
-                name = p.name.lower()
-                if name.endswith((".tar", ".tar.gz", ".tgz", ".tar.xz", ".txz")):
-                    nested = p
-                    break
-            if nested is None:
-                break
-            current_input = nested
-            # keep output as current_output
-            continue
         elif lower.endswith((".tar", ".tar.gz", ".tgz", ".tar.xz", ".txz")):
             mode = "r:"
             if lower.endswith((".tar.gz", ".tgz")):
@@ -116,11 +119,16 @@ def safe_extract(archive_path: Path, dest_root: Path) -> Path:
                 mode = "r:xz"
             with tarfile.open(current_input, mode) as tf:
                 _safe_extract_tar(tf, current_output)
-            # stop after tar extraction
-            break
         else:
-            # Not a recognized archive extension
+            # Not a recognized archive extension; stop
             break
+
+        # After extraction, look for a nested archive to continue
+        nested = _find_nested_archive(current_output)
+        if nested is None:
+            break
+        current_input = nested
+        # keep output as current_output
 
     logger.info("Extracted %s to %s", archive_path, work_dir)
     return work_dir
