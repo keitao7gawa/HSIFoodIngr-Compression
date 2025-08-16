@@ -1,0 +1,198 @@
+---
+alwaysApply: false
+---
+
+## 目的（ダウンロード直後からワンコマンド実行）
+`download` で取得したアーカイブ群（例: `HSIFoodIngr-64_data_*.zip.tar.gz`）が `data/raw` にある状態から、
+「解凍 → HDF5 追記処理 → 後始末（任意で削除）」までを、再実行可能かつ安全に一括実行できるようにする。
+
+## 前提 / ディレクトリ約束
+- 入力: `data/raw` にアーカイブ（`.zip`, `.tar.gz`, `.zip.tar.gz` など）が存在
+- 作業: `data/tmp/extract` に一時展開
+- 出力: `data/h5/HSIFoodIngr-64.h5`
+- 成果物: `artifacts/`（完了フラグ、ログ、マニフェスト類）
+
+## CLI 仕様（提案）
+新サブコマンド: `process-archives`
+
+```bash
+hsifoodingr process-archives \
+  --input-dir data/raw \
+  --work-dir data/tmp/extract \
+  --output-h5 data/h5/HSIFoodIngr-64.h5 \
+  --archive-glob "HSIFoodIngr-64_*.*" \
+  --remove-archive \
+  --remove-extracted \
+  --auto-bootstrap \
+  --workers 2 \
+  --dry-run   # 確認用（本実行時は外す）
+```
+
+### オプション詳細
+- `--input-dir PATH`: アーカイブ格納ディレクトリ（既定: `data/raw`）
+- `--work-dir PATH`: 解凍先の一時ディレクトリ（既定: `data/tmp/extract`）
+- `--output-h5 PATH`: HDF5 出力先（既定: `data/h5/HSIFoodIngr-64.h5`）
+- `--archive-glob PATTERN`: 対象アーカイブの glob（既定: `HSIFoodIngr-64_*.*`）
+- `--remove-archive | --keep-archive`: 処理後に元アーカイブを削除するか（既定: keep）
+- `--remove-extracted | --keep-extracted`: 処理後に展開済みを削除するか（既定: remove）
+- `--auto-bootstrap`: 必要成果物がなければ自動生成
+  - `build-manifest` → `build-ingredient-map` → `init-h5` を順次実行（存在チェックでスキップ）
+- `--workers INT`: アーカイブ単位の並列度（I/O 優先で 1-4 程度）
+- `--dry-run`: 実体ファイル操作をせず計画を表示
+
+## 動作フロー（擬似コード）
+1. 前提チェック / ブートストラップ（`--auto-bootstrap`）
+   - `artifacts/file_manifest.txt` が無ければ `build-manifest`
+   - `artifacts/ingredient_map.json` が無ければ `build-ingredient-map`
+   - `data/h5/HSIFoodIngr-64.h5` が無ければ `init-h5`
+2. アーカイブ列挙（`input-dir` + `archive-glob`）
+3. 各アーカイブごとに、安全な単位処理（冪等）
+   - `artifacts/processed_archives/<archive_basename>.done` があればスキップ
+   - 解凍先: `work-dir/<archive_basename>/`
+   - 展開ディレクトリから `REFLECTANCE_*` の basename 一覧を抽出
+   - 既存 HDF5 の `image_basenames` にあるものはスキップ（重複追記防止）
+   - 未処理 basename を `cli process` で順次追記（例外は `artifacts/failures.log` に追記）
+   - 追記終了後、`--remove-extracted` なら展開ディレクトリを削除
+   - `--remove-archive` なら元アーカイブを削除
+   - 最後に `artifacts/processed_archives/<archive_basename>.done` を作成
+4. 全アーカイブ完了で `.process_complete` を `artifacts/` に作成
+
+## 冪等性と安全装置
+- アーカイブ単位の完了フラグで再実行時に素早くスキップ
+- HDF5 側の `contains(basename)` を用いた重複追記防止
+- 解凍済み/削除済みの有無は存在チェックで分岐（エラーにしない）
+- 途中失敗しても、次回は未完了アーカイブのみ再開
+
+## ログとメトリクス
+- `artifacts/logs/process-archives.log`: 進捗/統計/警告
+- `artifacts/failures.log`: 失敗 basename と理由
+- 統計例: 受理アーカイブ数/スキップ数、追加サンプル数、処理時間
+
+## すぐ使える Runbook（コピペ用）
+
+### 0) ダウンロード
+```bash
+hsifoodingr download --output-dir data/raw --resume
+```
+
+### 1) 乾式テスト（何が起きるかの確認）
+```bash
+hsifoodingr process-archives \
+  --input-dir data/raw \
+  --work-dir data/tmp/extract \
+  --output-h5 data/h5/HSIFoodIngr-64.h5 \
+  --archive-glob "HSIFoodIngr-64_*" \
+  --auto-bootstrap \
+  --keep-archive \
+  --remove-extracted \
+  --workers 2 \
+  --dry-run
+```
+
+### 2) 本実行（Mac, I/O 優先で逐次）
+```bash
+hsifoodingr process-archives \
+  --input-dir data/raw \
+  --work-dir data/tmp/extract \
+  --output-h5 data/h5/HSIFoodIngr-64.h5 \
+  --archive-glob "HSIFoodIngr-64_*" \
+  --auto-bootstrap \
+  --remove-archive \
+  --remove-extracted \
+  --workers 1
+```
+
+## 実装タスクリスト（開発者向け）
+
+- 【CLI 追加】`hsifoodingr/cli.py` に `process-archives` を追加（Typer）
+  - 署名（目安）
+    - `input_dir: Path = Option("data/raw")`
+    - `work_dir: Path = Option("data/tmp/extract")`
+    - `output_h5: Path = Option("data/h5/HSIFoodIngr-64.h5")`
+    - `archive_glob: str = Option("HSIFoodIngr-64_*.*")`
+    - 削除フラグ: `remove_archive: bool = Option(False)`, `remove_extracted: bool = Option(True)`
+    - `auto_bootstrap: bool = Option(False)`
+    - `workers: int = Option(1, min=1, max=8)`
+    - `dry_run: bool = Option(False)`
+  - オプション整合性チェック
+    - 互換性のない組合せの検出（例: `workers>1` の場合は H5 への同時書込を禁止）
+    - `input_dir`, `work_dir` の作成（存在しなければ作成）
+  - 出力とログの初期化
+    - `artifacts/logs/process-archives.log` へファイルロガー
+    - 画面表示は Rich/TQDM を利用
+
+- 【ブートストラップ】必要に応じて自動実行（`--auto-bootstrap`）
+  - `processing/manifest.py` の CLI `build-manifest` を呼び出し
+  - `processing/ingredient_map.py` の CLI `build-ingredient-map` を呼び出し
+  - `io/hdf5_writer.py` / CLI `init-h5` を呼び出し
+  - いずれも成果物が既存ならスキップ
+
+- 【アーカイブ探索】`input_dir` + `archive_glob` で列挙
+  - 対象 0 件なら警告ログを出して終了
+  - 完了フラグ `artifacts/processed_archives/<archive>.done` を参照し、既処理をスキップ
+
+- 【解凍ユーティリティ】`hsifoodingr/utils/archive.py`
+  - `detect_archive_type(path: Path) -> Literal["zip", "tar", "targz", "tarxz", "zip-targz", "unknown"]`
+  - `safe_extract(archive_path: Path, dest_root: Path) -> Path`
+    - 複合拡張（例: `.zip.tar.gz`）は段階的に展開し、最終展開ディレクトリを返す
+    - ディレクトリトラバーサル対策（パス正規化、`..` 禁止）
+  - `cleanup_path(path: Path)` 安全削除（存在しない場合は no-op）
+
+- 【展開内容のスキャン】`hsifoodingr/processing/manifest_utils.py`（小ユーティリティ）
+  - `find_processable_basenames(root: Path) -> list[str]`
+    - `REFLECTANCE_*.{hdr,dat,png,json}` が全て揃う basename のみ返す
+  - （代替）既存の `processing/manifest.py` を再利用してローカル manifest を生成し抽出
+
+- 【HDF5 既存チェック】`io/hdf5_writer.py`
+  - `contains(basename: str) -> bool` の提供/利用
+  - 既存ならスキップ対象から除外
+
+- 【追記処理】`processing/pipeline.py` の公開 API を用意
+  - `process_and_append(basename: str, extracted_root: Path, h5_path: Path, ingredient_map_path: Path) -> None`
+    - ENVI/RGB/JSON 読取 → マスク生成 → HDF5 追記
+  - CLI `process` が存在する場合は、関数呼び出しに統一して内部から利用
+  - 例外は握りつぶさず、呼び出し側に伝播 or 明示ログ + 失敗記録
+
+- 【並列度】`workers` に応じた実行
+  - アーカイブ単位の並列は最大でも 1（HDF5 単一書込のため推奨）
+  - 代替: アーカイブは逐次、basename 内で I/O（読込+前処理）の並列化を検討
+  - HDF5 書込セクションは排他ロック（`threading.Lock`）で保護
+
+- 【フラグファイル/再実行性】
+  - 成功時: `artifacts/processed_archives/<archive>.done` を作成
+  - 全体完了: `artifacts/.process_complete` を作成
+  - 失敗した basename は `artifacts/failures.log` に逐次追記（basename, 理由, アーカイブ名）
+
+- 【削除ポリシー】
+  - `--remove-extracted`: 展開ディレクトリを削除（失敗時は警告のみ）
+  - `--remove-archive`: アーカイブを削除（冪等、存在しなければスキップ）
+
+- 【ディスク容量チェック】
+  - 解凍前に `shutil.disk_usage(work_dir)` を参照し、見積サイズ（ヘッダ or 圧縮係数係り）で安全マージン判定
+  - 不足時はスキップし警告
+
+- 【ログ/可視化】
+  - 進捗: アーカイブ数・basename 数で TQDM の進捗バー
+  - 要約: 追加件数 / スキップ件数 / 失敗件数 / 所要時間を最後に表示
+
+- 【ユニットテスト】`tests/`
+  - `test_archive_extract.py`: 小さなダミーファイルで `.zip`, `.tar.gz`, `.zip.tar.gz` の展開を検証
+  - `test_find_processable_basenames.py`: 4点セットの検出と欠損時スキップ
+  - `test_hdf5_contains.py`: `contains` の真偽と冪等追記
+  - （任意）`test_process_archives_cli.py`: `--dry-run` での計画出力検証
+
+- 【依存関係】（未追加なら）
+  - `typer`, `rich`, `tqdm`
+  - 既存: `h5py`, `numpy`, `Pillow`, `spectral`
+
+- 【DoD】
+  - ダウンロード直後に以下が通ること
+    - 乾式: `hsifoodingr process-archives --auto-bootstrap --dry-run`
+    - 本実行: `hsifoodingr process-archives --auto-bootstrap --remove-archive --remove-extracted`
+  - 再実行しても追記/削除の二重実行が発生しない（冪等）
+  - 失敗ログと完了フラグが正しく生成される
+
+## 注意事項
+- ディスク容量を常にチェック（展開サイズ > アーカイブサイズ）
+- 例外時はスキップして続行、最後に要約を表示
+- `--workers` を上げると I/O ボトルネックで遅くなる場合あり

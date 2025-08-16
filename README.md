@@ -97,6 +97,44 @@ python -m hsifoodingr.cli process \
 
 On errors, failures are appended to `data/artifacts/failures.log` and processing continues.
 
+### Process downloaded archives end-to-end (extract → append → cleanup)
+
+If you used the downloader and have archives under `data/raw`, you can run the whole flow in one command.
+
+Dry-run to preview actions:
+
+```bash
+python -m hsifoodingr.cli process-archives \
+  --input-dir data/raw \
+  --work-dir data/tmp/extract \
+  --output-h5 data/h5/HSIFoodIngr-64.h5 \
+  --archive-glob "HSIFoodIngr-64_*" \
+  --auto-bootstrap \
+  --keep-archive \
+  --remove-extracted \
+  --workers 1 \
+  --dry-run
+```
+
+Then run for real:
+
+```bash
+python -m hsifoodingr.cli process-archives \
+  --input-dir data/raw \
+  --work-dir data/tmp/extract \
+  --output-h5 data/h5/HSIFoodIngr-64.h5 \
+  --archive-glob "HSIFoodIngr-64_*" \
+  --auto-bootstrap \
+  --remove-archive \
+  --remove-extracted \
+  --workers 1
+```
+
+- `--auto-bootstrap` will create manifest, ingredient map, and initialize the HDF5 if missing (idempotent).
+- Already processed basenames in the HDF5 are skipped safely.
+- Per-archive completion flags are written to `data/artifacts/processed_archives/*.done`.
+- A global completion marker is written to `data/artifacts/.process_complete` once all matched items finish.
+
 ### 6) Verify and summarize
 
 ```bash
@@ -240,6 +278,44 @@ python -m hsifoodingr.cli process \
 ```
 
 エラーは `data/artifacts/failures.log` に追記され、処理は継続します。
+
+### ダウンロード直後からの一括処理（解凍 → 追記 → 後始末）
+
+ダウンローダで取得したアーカイブが `data/raw` にある場合、次のコマンドで一括実行できます。
+
+乾式（計画のみ表示）:
+
+```bash
+python -m hsifoodingr.cli process-archives \
+  --input-dir data/raw \
+  --work-dir data/tmp/extract \
+  --output-h5 data/h5/HSIFoodIngr-64.h5 \
+  --archive-glob "HSIFoodIngr-64_*" \
+  --auto-bootstrap \
+  --keep-archive \
+  --remove-extracted \
+  --workers 1 \
+  --dry-run
+```
+
+本実行:
+
+```bash
+python -m hsifoodingr.cli process-archives \
+  --input-dir data/raw \
+  --work-dir data/tmp/extract \
+  --output-h5 data/h5/HSIFoodIngr-64.h5 \
+  --archive-glob "HSIFoodIngr-64_*" \
+  --auto-bootstrap \
+  --remove-archive \
+  --remove-extracted \
+  --workers 1
+```
+
+- `--auto-bootstrap` はマニフェスト・ingredient_map・HDF5 初期化を未作成なら自動実行（冪等）。
+- HDF5 に既存の basename は自動スキップされます。
+- アーカイブごとの完了印は `data/artifacts/processed_archives/*.done` に出力されます。
+- 全完了時は `data/artifacts/.process_complete` を作成します。
 
 ### 6) 検証・要約
 

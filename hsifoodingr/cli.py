@@ -6,6 +6,7 @@ from pathlib import Path
 import typer
 
 from .utils import setup_rich_logging, get_logger
+from .utils.archive import safe_extract, cleanup_path
 from .processing import build_manifest as build_manifest_fn
 from .processing import build_ingredient_map as build_ingredient_map_fn
 from .processing import verify_h5 as verify_h5_fn
@@ -145,6 +146,136 @@ def summary(
         for name, cnt in s.top_dishes:
             typer.echo(f" - {name}: {cnt}")
 
+
+@app.command("process-archives")
+def process_archives(
+    input_dir: Path = typer.Option(Path("data/raw"), file_okay=False, resolve_path=True, help="Directory containing downloaded archives or extracted folders"),
+    work_dir: Path = typer.Option(Path("data/tmp/extract"), file_okay=False, resolve_path=True, help="Temporary extraction directory"),
+    output_h5: Path = typer.Option(Path("data/h5/HSIFoodIngr-64.h5"), file_okay=True, resolve_path=True, help="Target HDF5 file path (created if missing)"),
+    archive_glob: str = typer.Option("HSIFoodIngr-64_*", help="Glob to select archives or folders to process"),
+    remove_archive: bool = typer.Option(False, help="Remove archive file after successful processing"),
+    remove_extracted: bool = typer.Option(True, help="Remove extracted temporary folder after processing (only applies to extracted archives)"),
+    auto_bootstrap: bool = typer.Option(False, help="Auto-create manifest, ingredient_map, and initialize H5 if missing"),
+    workers: int = typer.Option(1, min=1, max=4, help="Parallelism level (archive-level). Use 1 to avoid HDF5 contention"),
+    dry_run: bool = typer.Option(False, help="Show planned actions without performing them"),
+) -> None:
+    """Process downloaded archives end-to-end: extract → append to HDF5 → cleanup."""
+    import json
+    import time
+    import os
+
+    logger = get_logger("hsifoodingr.process_archives")
+    artifacts_dir = Path("data/artifacts").resolve()
+    processed_marker_dir = artifacts_dir / "processed_archives"
+    processed_marker_dir.mkdir(parents=True, exist_ok=True)
+
+    # Bootstrap artifacts and H5 as needed
+    if auto_bootstrap:
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        # Manifest for the full input_dir (may be directories today)
+        try:
+            build_manifest_fn(raw_dir=input_dir, artifacts_dir=artifacts_dir)
+        except Exception:
+            # non-fatal
+            logger.debug("bootstrap: build-manifest skipped/failed")
+        try:
+            build_ingredient_map_fn(raw_dir=input_dir, artifacts_dir=artifacts_dir)
+        except Exception:
+            logger.debug("bootstrap: build-ingredient-map skipped/failed")
+
+        ingredient_map_path = artifacts_dir / "ingredient_map.json"
+        wavelengths_path = artifacts_dir / "wavelengths.txt"
+        if ingredient_map_path.exists() and not output_h5.exists():
+            try:
+                import numpy as np
+
+                ingredient_map = json.loads(ingredient_map_path.read_text())
+                txt = wavelengths_path.read_text().strip()
+                if "," in txt:
+                    values = [float(x) for x in txt.split(",") if x.strip()]
+                else:
+                    values = [float(x) for x in txt.splitlines() if x.strip()]
+                wavelengths = np.asarray(values, dtype=np.float32)
+                initialize_h5(h5_path=output_h5, ingredient_map=ingredient_map, wavelengths=wavelengths, overwrite=False)
+            except Exception:
+                logger.debug("bootstrap: init-h5 skipped/failed")
+
+    # Enumerate candidates: archives and folders
+    items = []
+    for p in input_dir.glob(archive_glob):
+        if p.is_file() or p.is_dir():
+            items.append(p)
+
+    if not items:
+        typer.echo("No archives or folders matched. Nothing to do.")
+        return
+
+    # Helper to compute a base name without multi-extensions
+    def _base_no_ext(path: Path) -> str:
+        name = path.name
+        while True:
+            base, ext = os.path.splitext(name)
+            if not ext:
+                return base
+            name = base
+
+    total_processed = 0
+    total_skipped = 0
+    started = time.time()
+
+    for item in sorted(items):
+        base = _base_no_ext(item)
+        done_marker = processed_marker_dir / f"{base}.done"
+        if done_marker.exists():
+            logger.info("skip %s (done)", item)
+            continue
+
+        plan = {
+            "item": str(item),
+            "base": base,
+            "action": "extract-and-process" if item.is_file() else "process-folder",
+            "work_dir": str(work_dir / base),
+            "remove_archive": bool(remove_archive and item.is_file()),
+            "remove_extracted": bool(remove_extracted and item.is_file()),
+        }
+        if dry_run:
+            typer.echo(f"PLAN: {plan}")
+            continue
+
+        try:
+            # extraction
+            if item.is_file():
+                extracted_root = safe_extract(item, work_dir)
+            else:
+                extracted_root = item
+
+            # process
+            processed, skipped = process_all_fn(
+                raw_dir=extracted_root,
+                artifacts_dir=artifacts_dir,
+                h5_path=output_h5,
+                skip_existing=True,
+                limit=None,
+                allow_missing_json=False,
+            )
+            total_processed += processed
+            total_skipped += skipped
+
+            # cleanup extracted only if we created it from an archive
+            if item.is_file() and remove_extracted:
+                cleanup_path(extracted_root)
+
+            # remove archive if requested
+            if item.is_file() and remove_archive:
+                cleanup_path(item)
+
+            done_marker.write_text("ok")
+        except Exception as e:
+            logger.exception("Failed processing %s: %s", item, e)
+            (artifacts_dir / "failures.log").open("a").write(f"[archive] {item}\t{e}\n")
+
+    elapsed = time.time() - started
+    typer.echo(f"done: processed={total_processed} skipped={total_skipped} in {elapsed:.1f}s")
 
 @app.command("progress")
 def progress(
