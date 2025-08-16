@@ -8,26 +8,6 @@ HSIFoodIngr-64データセットをHarvard Dataverseから自動ダウンロー�
 - **Persistent ID**: doi:10.7910/DVN/E7WDNQ
 - **データセット名**: HSIFoodIngr-64
 
-## 実装方法
-Harvard DataverseのNative APIおよびData Access APIを組み合わせ、2段階のプロセスでダウンロードを実行する。
-
-1. ファイルリストの取得
-   データセットに含まれる全ファイルのメタデータ（ファイルID、ファイル名）をリストとして取得する。
-   - エンドポイント: GET /api/datasets/:persistentId/versions/:latest
-2. 個別ファイルのダウンロード
-   取得したファイルリストをループ処理し、ファイルIDを元に各ファイルを個別にダウンロードする。
-   - エンドポイント: GET /api/access/datafile/{id}
-### 参考API仕様
-- **API ドキュメント**: https://guides.dataverse.org/en/latest/api/dataaccess.html#download-by-dataset-api
-- **エンドポイント**: `/api/datasets/:persistentId/versions/:latest`
-- **機能**: データセットのメタデータとファイルリストを取得
-- **レスポンス形式**: JSON（ファイルID、ファイル名、サイズ等を含む）
-
-- **API ドキュメント**: https://guides.dataverse.org/en/latest/api/dataaccess.html#download-by-file-id
-- **エンドポイント**: `/api/access/datafile/{id}`
-- **機能**: ファイルIDを指定して個別ファイルをダウンロード
-- **レスポンス形式**: バイナリデータ（ファイルの実体）
-
 ## 開発フェーズ
 
 ### フェーズ1: 基盤実装
