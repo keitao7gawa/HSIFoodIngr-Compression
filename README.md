@@ -125,6 +125,7 @@ python -m hsifoodingr.cli process-archives \
   --output-h5 data/h5/HSIFoodIngr-64.h5 \
   --archive-glob "HSIFoodIngr-64_*" \
   --auto-bootstrap \
+  --allow-missing-json \
   --remove-archive \
   --remove-extracted \
   --workers 1
@@ -134,6 +135,52 @@ python -m hsifoodingr.cli process-archives \
 - Already processed basenames in the HDF5 are skipped safely.
 - Per-archive completion flags are written to `data/artifacts/processed_archives/*.done`.
 - A global completion marker is written to `data/artifacts/.process_complete` once all matched items finish.
+
+If labels (JSON) live separately (e.g., inside `label.tar.gz`), you can append HDR/DAT/PNG first with `--allow-missing-json` and then ingest labels later:
+
+```bash
+# After extracting labels under data/raw/labels (for example)
+python -m hsifoodingr.cli ingest-labels \
+  --labels-root data/raw/labels \
+  --artifacts-dir data/artifacts \
+  --h5-path data/h5/HSIFoodIngr-64.h5
+```
+
+#### Labels packaged separately (label.tar.gz): end-to-end playbook
+
+1) Extract all data packages AND extract label archive under a common root (example layout)
+```
+data/
+  raw/
+    HSIFoodIngr-64_data_1.zip.tar.gz  (→ extracted to data/raw/HSIFoodIngr-64_data_1/...)
+    HSIFoodIngr-64_data_2.zip.tar.gz  (→ extracted to data/raw/HSIFoodIngr-64_data_2/...)
+    label.tar.gz                      (→ extracted to data/raw/labels/REFLECTANCE_*.json)
+```
+
+2) Append HDR/DAT/PNG first (JSON missing allowed)
+```bash
+python -m hsifoodingr.cli process-archives \
+  --input-dir data/raw \
+  --work-dir data/tmp/extract \
+  --output-h5 data/h5/HSIFoodIngr-64.h5 \
+  --archive-glob "HSIFoodIngr-64_*" \
+  --auto-bootstrap \
+  --allow-missing-json \
+  --remove-archive --remove-extracted \
+  --workers 1
+```
+
+3) Ingest labels (JSON) afterwards
+```bash
+python -m hsifoodingr.cli ingest-labels \
+  --labels-root data/raw/labels \
+  --artifacts-dir data/artifacts \
+  --h5-path data/h5/HSIFoodIngr-64.h5
+```
+
+Notes
+- Four files do NOT need to be in the same directory. Basename matching is used when ingesting labels.
+- Check logs at `data/artifacts/logs/process-archives.log` if items are skipped (e.g., already processed, or no JSON found yet).
 
 ### 6) Verify and summarize
 
@@ -307,6 +354,7 @@ python -m hsifoodingr.cli process-archives \
   --output-h5 data/h5/HSIFoodIngr-64.h5 \
   --archive-glob "HSIFoodIngr-64_*" \
   --auto-bootstrap \
+  --allow-missing-json \
   --remove-archive \
   --remove-extracted \
   --workers 1
@@ -316,6 +364,52 @@ python -m hsifoodingr.cli process-archives \
 - HDF5 に既存の basename は自動スキップされます。
 - アーカイブごとの完了印は `data/artifacts/processed_archives/*.done` に出力されます。
 - 全完了時は `data/artifacts/.process_complete` を作成します。
+
+もし JSON が別ツリー（例: `label.tar.gz` 配下）にある場合は、まず `--allow-missing-json` で HDR/DAT/PNG のみを追記し、後から JSON を取り込めます：
+
+```bash
+# 例: JSON を data/raw/labels 以下に展開後
+python -m hsifoodingr.cli ingest-labels \
+  --labels-root data/raw/labels \
+  --artifacts-dir data/artifacts \
+  --h5-path data/h5/HSIFoodIngr-64.h5
+```
+
+#### JSON が別アーカイブ（label.tar.gz）の場合の手順（推奨）
+
+1) すべてのデータパッケージと label アーカイブを共通ルートに展開（例）
+```
+data/
+  raw/
+    HSIFoodIngr-64_data_1.zip.tar.gz  （→ data/raw/HSIFoodIngr-64_data_1/... に展開）
+    HSIFoodIngr-64_data_2.zip.tar.gz  （→ data/raw/HSIFoodIngr-64_data_2/... に展開）
+    label.tar.gz                      （→ data/raw/labels/REFLECTANCE_*.json に展開）
+```
+
+2) まず HDR/DAT/PNG を追記（JSON 不在を許可）
+```bash
+python -m hsifoodingr.cli process-archives \
+  --input-dir data/raw \
+  --work-dir data/tmp/extract \
+  --output-h5 data/h5/HSIFoodIngr-64.h5 \
+  --archive-glob "HSIFoodIngr-64_*" \
+  --auto-bootstrap \
+  --allow-missing-json \
+  --remove-archive --remove-extracted \
+  --workers 1
+```
+
+3) 後から JSON を取り込み（basename で突合）
+```bash
+python -m hsifoodingr.cli ingest-labels \
+  --labels-root data/raw/labels \
+  --artifacts-dir data/artifacts \
+  --h5-path data/h5/HSIFoodIngr-64.h5
+```
+
+補足
+- 4 つのファイルが同じディレクトリである必要はありません。後段のラベル取り込み時に basename で突合します。
+- スキップ理由や進捗は `data/artifacts/logs/process-archives.log` を参照してください。
 
 ### 6) 検証・要約
 

@@ -15,6 +15,7 @@ from .processing import VerifyConfig as VerifyConfigCls
 from .processing.progress import compute_progress as compute_progress_fn
 from .io.hdf5_writer import initialize_h5
 from .processing.pipeline import process_all as process_all_fn
+from .processing.pipeline import ingest_labels as ingest_labels_fn
 from .download.downloader import download_dataset as download_dataset_fn
 from .download.downloader import extract_zip as extract_zip_fn
 from .download.downloader import DownloadOptions as DownloadOptionsCls
@@ -158,6 +159,7 @@ def process_archives(
     auto_bootstrap: bool = typer.Option(False, help="Auto-create manifest, ingredient_map, and initialize H5 if missing"),
     workers: int = typer.Option(1, min=1, max=4, help="Parallelism level (archive-level). Use 1 to avoid HDF5 contention"),
     dry_run: bool = typer.Option(False, help="Show planned actions without performing them"),
+    allow_missing_json: bool = typer.Option(False, help="Allow appending samples without JSON (placeholder mask/label); use 'ingest-labels' later to fill labels"),
 ) -> None:
     """Process downloaded archives end-to-end: extract → append to HDF5 → cleanup."""
     import json
@@ -305,7 +307,7 @@ def process_archives(
                 h5_path=output_h5,
                 skip_existing=True,
                 limit=None,
-                allow_missing_json=False,
+                allow_missing_json=allow_missing_json,
             )
             total_processed += processed
             total_skipped += skipped
@@ -342,6 +344,20 @@ def process_archives(
         elapsed,
     )
     typer.echo(f"done: processed={total_processed} skipped={total_skipped} in {elapsed:.1f}s")
+
+
+@app.command("ingest-labels")
+def ingest_labels(
+    labels_root: Path = typer.Option(..., exists=True, file_okay=False, resolve_path=True, help="Root directory containing REFLECTANCE_*.json files (recursively scanned)"),
+    artifacts_dir: Path = typer.Option(Path("data/artifacts"), file_okay=False, resolve_path=True, help="Artifacts directory (for ingredient_map.json and logs)"),
+    h5_path: Path = typer.Option(Path("data/h5/HSIFoodIngr-64.h5"), exists=True, file_okay=True, resolve_path=True, help="Target HDF5 file"),
+) -> None:
+    """Update masks and dish labels in-place from external labels (JSON) by basename.
+
+    Use after appending HDR/DAT/PNG without JSON.
+    """
+    updated, not_found = ingest_labels_fn(labels_root=labels_root, artifacts_dir=artifacts_dir, h5_path=h5_path)
+    typer.echo(f"labels: updated={updated} not_found={not_found}")
 
 @app.command("progress")
 def progress(

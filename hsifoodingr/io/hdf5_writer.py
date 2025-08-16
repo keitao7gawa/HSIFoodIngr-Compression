@@ -194,3 +194,40 @@ def contains_basename(f: h5py.File, basename: str) -> bool:
 
 def open_h5(h5_path: Path, mode: str = "a") -> h5py.File:
     return h5py.File(h5_path, mode)
+
+
+def index_of_basename(f: h5py.File, basename: str) -> Optional[int]:
+    ds = f["metadata/image_basenames"]
+    if ds.shape[0] == 0:
+        return None
+    try:
+        values = ds.asstr()[...].tolist()
+    except Exception:
+        values = [
+            v.decode("utf-8", errors="ignore") if isinstance(v, (bytes, bytearray)) else str(v)
+            for v in ds[...].tolist()
+        ]
+    try:
+        return values.index(str(basename))
+    except ValueError:
+        return None
+
+
+def update_labels_by_index(f: h5py.File, index: int, mask: np.ndarray, dish_label: str) -> None:
+    mask_ds = f["masks"]
+    expected_mask = mask_ds.shape[1:]
+    if mask.dtype != np.uint8:
+        mask = mask.astype(np.uint8, copy=False)
+    if tuple(mask.shape) != tuple(expected_mask):
+        raise ValueError(f"Mask shape {mask.shape} != expected {expected_mask}")
+    mask_ds[index] = mask
+    ds = f["metadata/dish_labels"]
+    ds[index] = str(dish_label)
+
+
+def update_labels_by_basename(f: h5py.File, basename: str, mask: np.ndarray, dish_label: str) -> bool:
+    idx = index_of_basename(f, basename)
+    if idx is None:
+        return False
+    update_labels_by_index(f, idx, mask, dish_label)
+    return True

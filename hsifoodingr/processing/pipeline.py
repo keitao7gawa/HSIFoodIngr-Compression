@@ -7,7 +7,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
 from ..utils import get_logger
-from ..io.hdf5_writer import open_h5, append_sample, contains_basename
+from ..io.hdf5_writer import open_h5, append_sample, contains_basename, update_labels_by_basename
 from .manifest import build_manifest
 from .mask_builder import build_mask, load_ingredient_map
 
@@ -128,24 +128,34 @@ def process_all(
                 hsi = envi_reader_module.read_envi_hsi(Path(item["hdr"]), Path(item["dat"]))
                 rgb = rgb_reader_module.read_rgb(Path(item["png"]))
                 ann_path_str = item.get("json", "")
-                if ann_path_str and Path(ann_path_str).exists():
+                has_json = bool(ann_path_str and Path(ann_path_str).exists())
+                if has_json:
                     ann = json_reader_module.read_annotation(Path(ann_path_str))
+                    height, width = int(hsi.shape[0]), int(hsi.shape[1])
+                    mask = build_mask(ann, ingredient_map, image_size_hw=(height, width))
+                    append_sample(
+                        f,
+                        hsi=hsi,
+                        rgb=rgb,
+                        mask=mask,
+                        basename=basename,
+                        dish_label=ann.dish if ann.dish else "",
+                    )
                 else:
-                    ann = json_reader_module.Annotation(dish="", ingredients=[])
-
-                # Build mask
-                height, width = int(hsi.shape[0]), int(hsi.shape[1])
-                mask = build_mask(ann, ingredient_map, image_size_hw=(height, width))
-
-                # Append
-                append_sample(
-                    f,
-                    hsi=hsi,
-                    rgb=rgb,
-                    mask=mask,
-                    basename=basename,
-                    dish_label=ann.dish if ann.dish else "",
-                )
+                    # If json is missing and allowed, append with empty labels
+                    if allow_missing_json:
+                        height, width = int(hsi.shape[0]), int(hsi.shape[1])
+                        empty_mask = np.zeros((height, width), dtype=np.uint8)
+                        append_sample(
+                            f,
+                            hsi=hsi,
+                            rgb=rgb,
+                            mask=empty_mask,
+                            basename=basename,
+                            dish_label="",
+                        )
+                    else:
+                        raise FileNotFoundError(f"Missing JSON for {basename}")
                 processed += 1
             except Exception as e:  # pragma: no cover - failure path
                 logger.exception("Failed processing %s: %s", basename, e)
@@ -156,3 +166,48 @@ def process_all(
 
     logger.info("Process completed: processed=%d, skipped=%d", processed, skipped)
     return processed, skipped
+
+
+def ingest_labels(
+    labels_root: Path,
+    artifacts_dir: Path,
+    h5_path: Path,
+) -> Tuple[int, int]:
+    """Update masks and dish labels for existing samples from JSON labels directory.
+
+    Returns (updated, not_found).
+    """
+    from ..io import json_reader as json_reader_module  # type: ignore
+
+    artifacts_dir = Path(artifacts_dir)
+    h5_path = Path(h5_path)
+    labels_root = Path(labels_root)
+
+    ingredient_map_path = artifacts_dir / "ingredient_map.json"
+    if not ingredient_map_path.exists():
+        raise FileNotFoundError(f"Missing ingredient_map.json at {ingredient_map_path}")
+    ingredient_map = load_ingredient_map(ingredient_map_path)
+
+    # collect json files
+    json_files = [p for p in labels_root.rglob("*.json") if p.is_file()]
+    updated = 0
+    not_found = 0
+    with open_h5(h5_path, mode="a") as f:
+        for jp in json_files:
+            basename = jp.stem
+            try:
+                ann = json_reader_module.read_annotation(jp)
+                # Build mask size from H5 dataset shape
+                height, width = int(f["masks"].shape[1]), int(f["masks"].shape[2])
+                mask = build_mask(ann, ingredient_map, image_size_hw=(height, width))
+                ok = update_labels_by_basename(f, basename, mask=mask, dish_label=ann.dish if ann.dish else "")
+                if ok:
+                    updated += 1
+                else:
+                    not_found += 1
+            except Exception as e:  # pragma: no cover - failure path
+                logger.exception("Failed ingesting label for %s: %s", basename, e)
+                _append_failure(artifacts_dir, basename, str(e))
+
+    logger.info("Label ingest completed: updated=%d, not_found=%d", updated, not_found)
+    return updated, not_found
