@@ -116,7 +116,7 @@ python -m hsifoodingr.cli process-archives \
   --dry-run
 ```
 
-Then run for real:
+Then run for real (handles nested archives like `.../HSIFoodIngr-64_data_101/HSIFoodIngr-64_data_101.zip` after first extraction):
 
 ```bash
 python -m hsifoodingr.cli process-archives \
@@ -298,7 +298,7 @@ python -m hsifoodingr.cli process-archives \
   --dry-run
 ```
 
-本実行:
+本実行（一次展開後にさらに内側の ZIP/TAR が現れる多段構成にも対応）:
 
 ```bash
 python -m hsifoodingr.cli process-archives \
