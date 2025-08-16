@@ -163,11 +163,34 @@ def process_archives(
     import json
     import time
     import os
+    import logging
 
     logger = get_logger("hsifoodingr.process_archives")
     artifacts_dir = Path("data/artifacts").resolve()
     processed_marker_dir = artifacts_dir / "processed_archives"
     processed_marker_dir.mkdir(parents=True, exist_ok=True)
+
+    # Attach a file logger to capture full run details (idempotent)
+    logs_dir = artifacts_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    logfile = logs_dir / "process-archives.log"
+    root_logger = logging.getLogger()
+    need_attach = True
+    for h in list(root_logger.handlers):
+        if isinstance(h, logging.FileHandler):
+            try:
+                if getattr(h, "baseFilename", "").endswith(str(logfile)):
+                    need_attach = False
+                    break
+            except Exception:
+                continue
+    if need_attach:
+        fh = logging.FileHandler(logfile, encoding="utf-8")
+        fh.setLevel(logging.INFO)
+        formatter = logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s")
+        fh.setFormatter(formatter)
+        root_logger.addHandler(fh)
+        logger.info("File logging enabled: %s", logfile)
 
     # Bootstrap artifacts and H5 as needed
     if auto_bootstrap:
@@ -175,13 +198,15 @@ def process_archives(
         # Manifest for the full input_dir (may be directories today)
         try:
             build_manifest_fn(raw_dir=input_dir, artifacts_dir=artifacts_dir)
-        except Exception:
+            logger.info("bootstrap: build-manifest done (raw_dir=%s)", input_dir)
+        except Exception as e:
             # non-fatal
-            logger.debug("bootstrap: build-manifest skipped/failed")
+            logger.debug("bootstrap: build-manifest skipped/failed: %s", e)
         try:
             build_ingredient_map_fn(raw_dir=input_dir, artifacts_dir=artifacts_dir)
-        except Exception:
-            logger.debug("bootstrap: build-ingredient-map skipped/failed")
+            logger.info("bootstrap: build-ingredient-map done (raw_dir=%s)", input_dir)
+        except Exception as e:
+            logger.debug("bootstrap: build-ingredient-map skipped/failed: %s", e)
 
         ingredient_map_path = artifacts_dir / "ingredient_map.json"
         wavelengths_path = artifacts_dir / "wavelengths.txt"
@@ -197,8 +222,9 @@ def process_archives(
                     values = [float(x) for x in txt.splitlines() if x.strip()]
                 wavelengths = np.asarray(values, dtype=np.float32)
                 initialize_h5(h5_path=output_h5, ingredient_map=ingredient_map, wavelengths=wavelengths, overwrite=False)
-            except Exception:
-                logger.debug("bootstrap: init-h5 skipped/failed")
+                logger.info("bootstrap: init-h5 done (h5=%s)", output_h5)
+            except Exception as e:
+                logger.debug("bootstrap: init-h5 skipped/failed: %s", e)
 
     # Enumerate candidates: archives and folders
     items = []
@@ -207,6 +233,8 @@ def process_archives(
             items.append(p)
 
     if not items:
+        msg = f"No archives or folders matched: glob={archive_glob} in {input_dir}"
+        logger.info(msg)
         typer.echo("No archives or folders matched. Nothing to do.")
         return
 
@@ -223,11 +251,28 @@ def process_archives(
     total_skipped = 0
     started = time.time()
 
+    # Log plan overview
+    logger.info(
+        "begin process-archives: input_dir=%s work_dir=%s out_h5=%s glob=%s remove_archive=%s remove_extracted=%s auto_bootstrap=%s workers=%d dry_run=%s items=%d",
+        input_dir,
+        work_dir,
+        output_h5,
+        archive_glob,
+        remove_archive,
+        remove_extracted,
+        auto_bootstrap,
+        workers,
+        dry_run,
+        len(items),
+    )
+    sample_items = [str(p) for p in sorted(items)[:5]]
+    logger.info("matched examples: %s%s", sample_items, " ..." if len(items) > 5 else "")
+
     for item in sorted(items):
         base = _base_no_ext(item)
         done_marker = processed_marker_dir / f"{base}.done"
         if done_marker.exists():
-            logger.info("skip %s (done)", item)
+            logger.info("skip (already done): item=%s marker=%s", item, done_marker)
             continue
 
         plan = {
@@ -239,17 +284,21 @@ def process_archives(
             "remove_extracted": bool(remove_extracted and item.is_file()),
         }
         if dry_run:
+            logger.info("plan: %s", plan)
             typer.echo(f"PLAN: {plan}")
             continue
 
         try:
             # extraction
             if item.is_file():
+                t0 = time.time()
                 extracted_root = safe_extract(item, work_dir)
+                logger.info("extracted: item=%s -> root=%s (%.2fs)", item, extracted_root, time.time() - t0)
             else:
                 extracted_root = item
 
             # process
+            t1 = time.time()
             processed, skipped = process_all_fn(
                 raw_dir=extracted_root,
                 artifacts_dir=artifacts_dir,
@@ -260,21 +309,38 @@ def process_archives(
             )
             total_processed += processed
             total_skipped += skipped
+            logger.info(
+                "processed archive: base=%s processed=%d skipped=%d (%.2fs)",
+                base,
+                processed,
+                skipped,
+                time.time() - t1,
+            )
 
             # cleanup extracted only if we created it from an archive
             if item.is_file() and remove_extracted:
                 cleanup_path(extracted_root)
+                logger.info("removed extracted: %s", extracted_root)
 
             # remove archive if requested
             if item.is_file() and remove_archive:
                 cleanup_path(item)
+                logger.info("removed archive: %s", item)
 
             done_marker.write_text("ok")
+            logger.info("done marker created: %s", done_marker)
         except Exception as e:
             logger.exception("Failed processing %s: %s", item, e)
             (artifacts_dir / "failures.log").open("a").write(f"[archive] {item}\t{e}\n")
 
     elapsed = time.time() - started
+    logger.info(
+        "end process-archives: total processed=%d skipped=%d archives=%d elapsed=%.1fs",
+        total_processed,
+        total_skipped,
+        len(items),
+        elapsed,
+    )
     typer.echo(f"done: processed={total_processed} skipped={total_skipped} in {elapsed:.1f}s")
 
 @app.command("progress")
