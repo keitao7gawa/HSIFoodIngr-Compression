@@ -193,6 +193,11 @@ def ingest_labels(
     updated = 0
     not_found = 0
     with open_h5(h5_path, mode="a") as f:
+        # Ensure H5 stores the latest ingredient_map so downstream summary has correct class count
+        try:
+            f["metadata/ingredient_map"][0] = json.dumps(ingredient_map, ensure_ascii=False)
+        except Exception as e:  # pragma: no cover
+            logger.warning("Failed to update ingredient_map in H5: %s", e)
         for jp in json_files:
             basename = jp.stem
             try:
