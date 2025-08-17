@@ -205,7 +205,22 @@ def ingest_labels(
                 # Build mask size from H5 dataset shape
                 height, width = int(f["masks"].shape[1]), int(f["masks"].shape[2])
                 mask = build_mask(ann, ingredient_map, image_size_hw=(height, width))
-                ok = update_labels_by_basename(f, basename, mask=mask, dish_label=ann.dish if ann.dish else "")
+                # Determine dish label: prefer explicit ann.dish; otherwise derive from ingredient names
+                dish_label = ann.dish.strip() if getattr(ann, "dish", "") else ""
+                if not dish_label:
+                    # Heuristic: take the most common prefix before '/' across ingredient names
+                    prefixes: Dict[str, int] = {}
+                    for ing in ann.ingredients:
+                        name = (ing.name or "").strip()
+                        if not name:
+                            continue
+                        prefix = name.split("/", 1)[0].strip()
+                        if not prefix:
+                            continue
+                        prefixes[prefix] = prefixes.get(prefix, 0) + 1
+                    if prefixes:
+                        dish_label = max(prefixes.items(), key=lambda kv: (kv[1], kv[0]))[0]
+                ok = update_labels_by_basename(f, basename, mask=mask, dish_label=dish_label)
                 if ok:
                     updated += 1
                 else:
