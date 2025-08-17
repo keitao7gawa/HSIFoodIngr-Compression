@@ -112,7 +112,7 @@ def _parse_geojson_like(data: Dict) -> Annotation:
 
 
 def read_annotation(json_path: Path) -> Annotation:
-    data = json.loads(Path(json_path).read_text())
+    data = json.loads(Path(json_path).read_text(encoding="utf-8"))
     # Prefer standard schema; fallback to GeoJSON-like schema
     if isinstance(data, dict) and (data.get("ingredients") is not None):
         return _parse_standard_annotation(data)

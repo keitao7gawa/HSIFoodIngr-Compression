@@ -77,9 +77,9 @@ def init_h5(
     import json
     import numpy as np
 
-    ingredient_map = json.loads(ingredient_map_path.read_text())
+    ingredient_map = json.loads(ingredient_map_path.read_text(encoding="utf-8"))
     # wavelengths file: accept CSV or plain lines
-    txt = wavelengths_path.read_text().strip()
+    txt = wavelengths_path.read_text(encoding="utf-8").strip()
     if "," in txt:
         values = [float(x) for x in txt.split(",") if x.strip()]
     else:
@@ -216,8 +216,8 @@ def process_archives(
             try:
                 import numpy as np
 
-                ingredient_map = json.loads(ingredient_map_path.read_text())
-                txt = wavelengths_path.read_text().strip()
+                ingredient_map = json.loads(ingredient_map_path.read_text(encoding="utf-8"))
+                txt = wavelengths_path.read_text(encoding="utf-8").strip()
                 if "," in txt:
                     values = [float(x) for x in txt.split(",") if x.strip()]
                 else:

@@ -59,7 +59,7 @@ def build_mask(
 def load_ingredient_map(path: Path) -> Dict[str, int]:
     import json
 
-    data = json.loads(Path(path).read_text())
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
     mapping: Dict[str, int] = {}
     for k, v in data.items():
         try:
