@@ -5,24 +5,27 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Set
 
 from ..utils import get_logger
+from ..io.json_reader import read_annotation
 
 logger = get_logger(__name__)
 
 
 def _extract_ingredient_names(json_paths: Iterable[Path]) -> Set[str]:
+    """Gather unique ingredient names from JSON files.
+
+    Supports both standard schema (top-level ingredients[]) and GeoJSON-like
+    schema under features/markResult.features with properties.content.label.
+    """
     names: Set[str] = set()
     for p in json_paths:
         try:
-            data = json.loads(p.read_text(encoding="utf-8"))
+            ann = read_annotation(p)
+            for ing in ann.ingredients:
+                if isinstance(ing.name, str) and ing.name.strip():
+                    names.add(ing.name.strip())
         except Exception as e:  # pragma: no cover
-            logger.warning("Failed to read JSON %s: %s", p, e)
+            logger.warning("Failed to parse JSON %s: %s", p, e)
             continue
-        # Expected structure: { dish: str, ingredients: [ {name: str, polygons: [...]}, ...] }
-        ingredients = data.get("ingredients") or []
-        for item in ingredients:
-            name = item.get("name")
-            if isinstance(name, str) and name.strip():
-                names.add(name.strip())
     return names
 
 
