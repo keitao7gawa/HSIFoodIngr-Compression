@@ -16,6 +16,7 @@ from .processing.progress import compute_progress as compute_progress_fn
 from .io.hdf5_writer import initialize_h5
 from .processing.pipeline import process_all as process_all_fn
 from .processing.pipeline import ingest_labels as ingest_labels_fn
+from .processing.transform import rotate_hsi_inplace as rotate_hsi_inplace_fn
 from .download.downloader import download_dataset as download_dataset_fn
 from .download.downloader import extract_zip as extract_zip_fn
 from .download.downloader import DownloadOptions as DownloadOptionsCls
@@ -358,6 +359,28 @@ def ingest_labels(
     """
     updated, not_found = ingest_labels_fn(labels_root=labels_root, artifacts_dir=artifacts_dir, h5_path=h5_path)
     typer.echo(f"labels: updated={updated} not_found={not_found}")
+
+
+@app.command("rotate-hsi")
+def rotate_hsi(
+    h5_path: Path = typer.Option(Path("data/h5/HSIFoodIngr-64.h5"), exists=True, file_okay=True, resolve_path=True, help="Target HDF5 file"),
+    clockwise: bool = typer.Option(True, help="Rotate 90 degrees clockwise (right). Use --no-clockwise for counter-clockwise."),
+    batch_size: int = typer.Option(16, min=1, help="Batch size for in-place updates"),
+    start: int = typer.Option(0, min=0, help="Start index (inclusive)"),
+    end: int | None = typer.Option(None, help="End index (exclusive). None = until end"),
+) -> None:
+    """Rotate existing HSI samples in-place by 90° steps.
+
+    Note: This updates the HDF5 file destructively. Make a backup if needed.
+    """
+    k = -1 if clockwise else 1
+    processed, shape = rotate_hsi_inplace_fn(
+        h5_path=h5_path,
+        k=k,
+        batch_size=batch_size,
+        index_range=(start, end) if end is not None else None,
+    )
+    typer.echo(f"rotated: processed={processed} shape={shape} k={k}")
 
 @app.command("progress")
 def progress(

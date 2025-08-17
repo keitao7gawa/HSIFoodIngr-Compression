@@ -126,6 +126,8 @@ def process_all(
             try:
                 # Read inputs
                 hsi = envi_reader_module.read_envi_hsi(Path(item["hdr"]), Path(item["dat"]))
+                # Rotate HSI 90 degrees to the right (clockwise) so axes remain (H, W, Bands)
+                hsi = np.rot90(hsi, k=-1, axes=(0, 1))
                 rgb = rgb_reader_module.read_rgb(Path(item["png"]))
                 ann_path_str = item.get("json", "")
                 has_json = bool(ann_path_str and Path(ann_path_str).exists())
