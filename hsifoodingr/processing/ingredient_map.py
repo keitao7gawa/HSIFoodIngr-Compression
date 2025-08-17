@@ -13,7 +13,7 @@ def _extract_ingredient_names(json_paths: Iterable[Path]) -> Set[str]:
     names: Set[str] = set()
     for p in json_paths:
         try:
-            data = json.loads(p.read_text())
+            data = json.loads(p.read_text(encoding="utf-8"))
         except Exception as e:  # pragma: no cover
             logger.warning("Failed to read JSON %s: %s", p, e)
             continue

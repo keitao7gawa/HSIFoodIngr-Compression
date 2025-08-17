@@ -19,7 +19,7 @@ def _read_processable_list(artifacts_dir: Path) -> List[Dict[str, str]]:
     if not details_path.exists():
         return []
     try:
-        data = json.loads(details_path.read_text())
+        data = json.loads(details_path.read_text(encoding="utf-8"))
         # basic validation
         if isinstance(data, list):
             cleaned: List[Dict[str, str]] = []
