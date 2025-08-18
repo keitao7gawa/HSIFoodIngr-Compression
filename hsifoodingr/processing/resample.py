@@ -6,6 +6,7 @@ from typing import Iterable, Tuple
 
 import numpy as np
 import h5py
+import time
 
 from ..utils import get_logger
 
@@ -51,6 +52,7 @@ def _create_output_file(out_path: Path, in_f: h5py.File, new_wavelengths: np.nda
         shuffle=True,
     )
     hsi_out.attrs["description"] = "Hyperspectral data cubes (height, width, bands)."
+    logger.info("created output H5: %s; hsi shape=(%d,%d,%d,%d)", out_path, n, h, w, new_b)
 
     # RGB copy target
     rgb_in = in_f["rgb"]
@@ -163,6 +165,15 @@ def resample_h5(config: ResampleConfig) -> Tuple[int, Tuple[int, int, int, int]]
         if wl_new.ndim != 1 or wl_new.size < 2:
             raise ValueError("Invalid target wavelengths")
 
+        logger.info(
+            "resample start: input=%s output=%s old_bands=%d new_bands=%d chunk=%d",
+            input_h5,
+            output_h5,
+            int(wl_old.size),
+            int(wl_new.size),
+            int(config.chunk_size),
+        )
+
         fout = _create_output_file(output_h5, fin, wl_new, config.overwrite)
         try:
             # Copy RGB/Masks in batches (after HSI), but we need them created upfront
@@ -171,17 +182,35 @@ def resample_h5(config: ResampleConfig) -> Tuple[int, Tuple[int, int, int, int]]
             hsi_out = fout["hsi"]
             n = int(hsi_in.shape[0])
             bsz = int(config.chunk_size)
+            t0 = time.time()
             for i in range(0, n, bsz):
                 j = min(i + bsz, n)
                 batch = hsi_in[i:j, ...]
                 out = _interpolate_batch(batch, wl_old=wl_old, wl_new=wl_new)
                 hsi_out[i:j, ...] = out
+                done = j
+                pct = 100.0 * done / max(1, n)
+                elapsed = time.time() - t0
+                rate = done / max(1e-9, elapsed)
+                eta = (n - done) / max(1e-9, rate)
+                logger.info(
+                    "resample HSI: %d/%d (%.1f%%) batch=%d elapsed=%.1fs eta=%.1fs",
+                    done,
+                    n,
+                    pct,
+                    j - i,
+                    elapsed,
+                    eta,
+                )
 
             # Copy RGB/Masks
+            logger.info("copy rgb ...")
             _copy_dataset(fin["rgb"], fout["rgb"], batch=max(1, config.chunk_size * 2))
+            logger.info("copy masks ...")
             _copy_dataset(fin["masks"], fout["masks"], batch=max(1, config.chunk_size * 2))
 
             # Copy metadata string datasets
+            logger.info("copy metadata strings ...")
             for name in ("image_basenames", "dish_labels"):
                 src = fin["metadata/"][name]
                 dst = fout["metadata/"][name]
@@ -191,6 +220,7 @@ def resample_h5(config: ResampleConfig) -> Tuple[int, Tuple[int, int, int, int]]
                 except Exception:
                     data = src[...]
                 dst[...] = data
+            logger.info("resample done: samples=%d elapsed=%.1fs", n, time.time() - t0)
         finally:
             fout.close()
 
