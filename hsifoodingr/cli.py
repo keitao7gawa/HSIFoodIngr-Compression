@@ -20,6 +20,8 @@ from .processing.transform import rotate_hsi_inplace as rotate_hsi_inplace_fn
 from .download.downloader import download_dataset as download_dataset_fn
 from .download.downloader import extract_zip as extract_zip_fn
 from .download.downloader import DownloadOptions as DownloadOptionsCls
+from .processing.resample import ResampleConfig as ResampleConfigCls
+from .processing.resample import resample_h5 as resample_h5_fn
 
 app = typer.Typer(add_completion=False, help="HSIFoodIngr-64 HDF5 builder CLI")
 
@@ -432,6 +434,29 @@ def download(
     marker = download_dataset_fn(opts)
     typer.echo(str(marker))
 
+
+@app.command("resample-bands")
+def resample_bands(
+    input_h5: Path = typer.Option(..., exists=True, file_okay=True, resolve_path=True, help="Input H5 with original bands"),
+    output_h5: Path = typer.Option(..., file_okay=True, resolve_path=True, help="Output H5 with resampled 121 bands"),
+    start: float = typer.Option(400.0, help="Start wavelength (nm)"),
+    end: float = typer.Option(1000.0, help="End wavelength (nm)"),
+    step: float = typer.Option(5.0, help="Step (nm)"),
+    chunk: int = typer.Option(8, help="Batch size (number of samples)"),
+    overwrite: bool = typer.Option(False, help="Overwrite output file if exists"),
+) -> None:
+    import numpy as np
+
+    new_wl = np.arange(start, end + 1e-6, step, dtype=np.float32)
+    cfg = ResampleConfigCls(
+        input_h5=input_h5,
+        output_h5=output_h5,
+        new_wavelengths=new_wl,
+        chunk_size=chunk,
+        overwrite=overwrite,
+    )
+    n, shape = resample_h5_fn(cfg)
+    typer.echo(f"resampled: samples={n} shape={shape} wl={new_wl[0]}..{new_wl[-1]} (len={len(new_wl)})")
 
 def run() -> None:  # For `python -m hsifoodingr.cli`
     app()

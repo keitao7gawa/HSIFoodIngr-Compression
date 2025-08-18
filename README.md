@@ -195,6 +195,23 @@ python -m hsifoodingr.cli summary --h5-path data/h5/HSIFoodIngr-64.h5 --top-k 10
 - `verify` checks: required datasets, dtypes, shapes, sample alignment, wavelengths length, duplicate basenames, NaN/Inf in HSI (chunked; limited by `--scan-limit`).
 - `summary` prints: sample count, shapes, wavelength min/mean/max, per-class pixel counts (mapped from `ingredient_map`), top dish labels.
 
+### Resample HSI bands to 400–1000nm / 5nm (121 bands)
+
+Create a new H5 with linearly resampled bands (original H5 is not modified).
+
+```bash
+python -m hsifoodingr.cli resample-bands \
+  --input-h5 data/h5/HSIFoodIngr-64.h5 \
+  --output-h5 data/h5/HSIFoodIngr-64_400-1000nm_5nm.h5 \
+  --start 400 --end 1000 --step 5 \
+  --chunk 8 \
+  --overwrite
+```
+
+Notes
+- Linear interpolation per pixel spectrum; no extrapolation beyond ends (clamped).
+- Copies `/rgb`, `/masks`, and metadata; replaces `/metadata/wavelengths` with 121 values.
+
 ## HDF5 layout
 
 ```
@@ -423,6 +440,23 @@ python -m hsifoodingr.cli summary --h5-path data/h5/HSIFoodIngr-64.h5 --top-k 10
 
 - `verify` は必須データセットの有無、dtype・形状、サンプル数整合、波長長、basename 重複、HSI の NaN/Inf（チャンク・サンプリング）を確認します。
 - `summary` はサンプル数・形状・波長の統計、クラス別ピクセル数（`ingredient_map` による名称対応）、上位料理ラベルを表示します。
+
+### バンド再サンプル（400–1000nm / 5nm・121バンド）
+
+元の H5 を変更せず、線形補間で 121 バンド版の新しい H5 を生成します。
+
+```bash
+python -m hsifoodingr.cli resample-bands \
+  --input-h5 data/h5/HSIFoodIngr-64.h5 \
+  --output-h5 data/h5/HSIFoodIngr-64_400-1000nm_5nm.h5 \
+  --start 400 --end 1000 --step 5 \
+  --chunk 8 \
+  --overwrite
+```
+
+注意
+- 各ピクセルのスペクトルを線形補間。端は外挿せず端値でクランプ。
+- `/rgb`, `/masks` と各種メタデータをコピーし、`/metadata/wavelengths` は 121 要素に置換されます。
 
 ## HDF5 構造
 

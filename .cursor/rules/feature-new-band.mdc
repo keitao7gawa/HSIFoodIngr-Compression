@@ -1,0 +1,97 @@
+---
+alwaysApply: false
+---
+# 仕様書: 400–1000nm を 5nm 刻み（121バンド）にリサンプリングした H5 を生成
+
+## 概要
+既存の HDF5（204バンド）から、400.0, 405.0, …, 1000.0 nm の 121 バンドへ線形補間し、新しい HDF5 を生成する。元 H5 は書き換えない。
+
+## ゴール
+- **統一バンド**: 400–1000nm, 5nm step, 121 bands
+- **互換構造**: `/rgb`, `/masks`, `/metadata/*` は元と同数サンプルで整合
+- **安全性**: 元 H5 は read-only、出力は新規作成（上書きは明示オプション）
+
+## CLI 提案
+新コマンド: `resample-bands`
+
+```bash
+python -m hsifoodingr.cli resample-bands \
+  --input-h5 data/h5/HSIFoodIngr-64.h5 \
+  --output-h5 data/h5/HSIFoodIngr-64_400-1000nm_5nm.h5 \
+  --start 400.0 --end 1000.0 --step 5.0 \
+  --chunk 8 \
+  --overwrite   # 既存出力がある場合にのみ付ける
+```
+
+### オプション
+- `--input-h5 PATH`: 元 H5（204バンド）
+- `--output-h5 PATH`: 出力 H5（121バンド）
+- `--start/--end/--step`: 新バンド定義（既定: 400, 1000, 5）
+- `--chunk INT`: サンプルのバッチ処理件数（既定: 8）
+- `--overwrite`: 出力ファイルが存在する場合に上書き許可
+
+## 入出力仕様
+- 入力: `/hsi`: float32 (N, 512, 512, 204), `/metadata/wavelengths`: float32 (204,)
+- 出力: `/hsi`: float32 (N, 512, 512, 121), `/metadata/wavelengths`: float32 (121,)
+- その他: `/rgb`, `/masks`, `/metadata/{image_basenames,dish_labels,ingredient_map}` はコピー
+
+## 補間アルゴリズム
+- 各画素のスペクトルベクトル `S_old(bands)` を、新バンド座標 `λ_new` へ**線形補間**
+- 範囲外の扱い: 端で**外挿しない**。`λ_new < min(λ_old)` と `> max(λ_old)` は端値でクランプ
+- 欠損値: 入力 NaN/Inf は補間前に安全化（NaN→0, Inf→0 など）し、出力も有限値を保証
+
+## パフォーマンス/メモリ
+- サンプル単位のバッチ処理（`--chunk`）で `/hsi` を読み→補間→書き込み
+- ベクトル化（NumPy）で (H×W) ピクセルを一括補間
+- 出力 H5 は gzip 圧縮・チャンク形状は既存に準拠（例: `(1,64,64,32)`→121用に `(1,64,64,32)` で可）
+
+## 検証
+- 形状: `/hsi` の最後次元=121、サンプル数=N が一致
+- 波長: `/metadata/wavelengths` が 400..1000 の 121 要素か
+- 画素範囲: NaN/Inf がないこと
+
+## 失敗時の扱い
+- 出力ファイルは部分生成のまま残さない（例外時は中断・削除、または `.incomplete` マーカー）
+- ログ: `artifacts/logs/resample-bands.log`
+
+## すぐ使える Runbook
+```bash
+# 1) ドライラン相当（波長と件数の確認）
+python - <<'PY'
+import h5py; import numpy as np
+with h5py.File('data/h5/HSIFoodIngr-64.h5','r') as f:
+    print(f['hsi'].shape, f['metadata/wavelengths'][:5], f['metadata/wavelengths'][-5:])
+PY
+
+# 2) 本実行
+python -m hsifoodingr.cli resample-bands \
+  --input-h5 data/h5/HSIFoodIngr-64.h5 \
+  --output-h5 data/h5/HSIFoodIngr-64_400-1000nm_5nm.h5 \
+  --chunk 8 --overwrite
+
+# 3) 検証
+python -m hsifoodingr.cli summary --h5-path data/h5/HSIFoodIngr-64_400-1000nm_5nm.h5
+```
+
+## 実装タスクリスト（開発者向け）
+- CLI: `hsifoodingr/cli.py` に `resample-bands` を追加（Typer）
+  - 引数: `input_h5`, `output_h5`, `start`, `end`, `step`, `chunk`, `overwrite`
+- 処理: `hsifoodingr/processing/resample.py` を新設
+  - 関数: `resample_h5(input_h5, output_h5, new_wavelengths, chunk, overwrite)`
+    - 入力 H5 を `r`、出力 H5 を `w`/`w-` で安全作成
+    - 出力 `/hsi` をリサイズ可能データセットで作成し、バッチで追記
+    - `/rgb`, `/masks`, `/metadata/{image_basenames,dish_labels,ingredient_map}` をコピー
+    - `/metadata/wavelengths` を新配列で保存
+  - 補間実装: `interp1d` 相当を NumPy で実装（ソート・クランプ）
+- ログ: `artifacts/logs/resample-bands.log` に詳細（開始/終了、進捗、経過時間、統計）
+- テスト: `tests/test_resample_bands.py`
+  - ダミー H5 で 3→5 バンドなど簡易ケースの再サンプル検証
+  - NaN/Inf の安全化、端値クランプの確認
+
+## DoD（完了基準）
+- CLI 実行で 121 バンドの H5 が生成
+- `summary` が正常に動作し、サンプル数・形状・波長が期待どおり
+- 元 H5 は未変更、出力 H5 の他データ（rgb/masks/metadata）が元と整合
+
+## 参照
+- [Issue #1: 400~1000nmを5nm刻み・121バンドのバージョン生成要望](https://github.com/keitao7gawa/HSIFoodIngr-Compression/issues/1)
